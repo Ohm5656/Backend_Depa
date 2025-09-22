@@ -113,12 +113,6 @@ def _extract_public_subpath(parts):
             return segment
     return None
 
-
-def _payload_signature(payload: dict, ignore_keys: tuple[str, ...] = ()) -> str:
-    filtered = {k: payload[k] for k in payload if k not in ignore_keys}
-    return json.dumps(filtered, sort_keys=True, ensure_ascii=False)
-
-
 def make_public_url(file_path: str) -> str:
     abs_file = os.path.abspath(file_path)
     rel_path = _relative_to_storage(abs_file)
@@ -528,11 +522,6 @@ last_seen_paths = {
     "din": None
 }
 
-last_sent_signatures = {
-    "status": None,
-    "size": None
-}
-
 # =========================
 # 4) BUILDERS
 # =========================
@@ -618,7 +607,7 @@ def build_shrimp_size_json(pond_id: int) -> dict:
 # 5) BACKGROUND LOOP
 # =========================
 async def loop_build_and_push(pond_id: int):
-    global last_seen_data, last_seen_paths, last_sent_signatures
+    global last_seen_data, last_seen_paths
     while True:
         try:
             status_dirty = False
@@ -676,19 +665,13 @@ async def loop_build_and_push(pond_id: int):
             if status_dirty or size_dirty:
                 if status_dirty:
                     status_json = build_pond_status_json(pond_id)
-                    status_signature = _payload_signature(status_json, ("timestamp", "pondId"))
-                    if status_signature != last_sent_signatures.get("status"):
                         if APP_STATUS_URL:
                             _send_json_to(APP_STATUS_URL, status_json)
-                        last_sent_signatures["status"] = status_signature
 
                 if size_dirty:
                     size_json = build_shrimp_size_json(pond_id)
-                    size_signature = _payload_signature(size_json, ("timestamp", "pondId"))
-                    if size_signature != last_sent_signatures.get("size"):
                         if APP_SIZE_URL:
                             _send_json_to(APP_SIZE_URL, size_json)
-                        last_sent_signatures["size"] = size_signature
 
                 for key, value in new_paths.items():
                     last_seen_paths[key] = value
