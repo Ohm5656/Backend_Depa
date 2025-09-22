@@ -622,8 +622,18 @@ def build_shrimp_size_json(pond_id: int) -> dict:
 # =========================
 # 5) BACKGROUND LOOP
 # =========================
+import copy
+
 last_sent_status = None
 last_sent_size = None
+
+def _strip_timestamp(d: dict) -> dict:
+    """คืนค่า dict โดยตัด timestamp ออกไป"""
+    if not d:
+        return {}
+    d_copy = copy.deepcopy(d)
+    d_copy.pop("timestamp", None)
+    return d_copy
 
 async def loop_build_and_push(pond_id: int):
     global last_seen_data, last_sent_status, last_sent_size
@@ -658,16 +668,18 @@ async def loop_build_and_push(pond_id: int):
             status_json = build_pond_status_json(pond_id)
             size_json   = build_shrimp_size_json(pond_id)
 
-            # 📤 ส่งก็ต่อเมื่อมีข้อมูลใหม่ (ไม่สนว่าครบหรือไม่ครบ field)
-            if APP_STATUS_URL and status_json != last_sent_status:
+            # 📤 ส่งเฉพาะตอนข้อมูลเปลี่ยนจริง (ไม่ดู timestamp)
+            status_clean = _strip_timestamp(status_json)
+            if APP_STATUS_URL and status_clean != last_sent_status:
                 print("📤 Sending pond_status_json:", status_json)
                 _send_json_to(APP_STATUS_URL, status_json)
-                last_sent_status = status_json
+                last_sent_status = status_clean   # เก็บค่าแบบไม่มี timestamp
 
-            if APP_SIZE_URL and size_json != last_sent_size:
+            size_clean = _strip_timestamp(size_json)
+            if APP_SIZE_URL and size_clean != last_sent_size:
                 print("📤 Sending shrimp_size_json:", size_json)
                 _send_json_to(APP_SIZE_URL, size_json)
-                last_sent_size = size_json
+                last_sent_size = size_clean
 
         except Exception as e:
             print("🚨 Loop error:", e)
