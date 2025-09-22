@@ -744,6 +744,18 @@ def read_json(path: str):
 @app.get("/")
 def health_check():
     return {"status": "ok"}
+
+
+# =========================
+# 7) STARTUP: Run background loop
+# =========================
+@app.on_event("startup")
+async def startup_event():
+    # สามารถแก้ pond_id ให้ dynamic ได้ แต่เบื้องต้น hardcode 1 ก่อน
+    pond_id = 1
+    import asyncio
+    asyncio.create_task(loop_build_and_push(pond_id))
+
 # =========================
 # 7) ENTRYPOINT
 # =========================
