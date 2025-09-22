@@ -18,10 +18,10 @@ TOPIC_CMD = "pond/doser/cmd"       # backend → Arduino
 TOPIC_STATUS = "pond/doser/status" # Arduino → backend (ส่ง ultrasonic)
 
 # ✅ Path (Windows ใช้ full path, Railway ใช้ relative)
-SENSOR_BASE = os.environ.get("SENSOR_BASE", "./local_storage/sensor")
-POND_INFO_BASE = os.environ.get("POND_INFO_BASE", "./data_ponds")
-TXT_WATER_DIR = os.environ.get("TXT_WATER_DIR", "./output/water_output")
-SAN_BASE = os.environ.get("SAN_BASE", "./local_storage/san")
+SENSOR_BASE = os.environ.get("SENSOR_BASE", "/data/local_storage/sensor")
+POND_INFO_BASE = os.environ.get("POND_INFO_BASE", "/data/data_ponds")
+TXT_WATER_DIR = os.environ.get("TXT_WATER_DIR", "/data/output/water_output")
+SAN_BASE = os.environ.get("SAN_BASE", "/data/local_storage/san")
 os.makedirs(SAN_BASE, exist_ok=True)
 
 # =================================================
