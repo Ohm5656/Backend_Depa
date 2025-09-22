@@ -222,7 +222,7 @@ def save_json_result(result_type, original_name,
     save_dir = os.path.join(LOCAL_STORAGE_BASE, result_type)
     os.makedirs(save_dir, exist_ok=True)
 
-    json_filename = f"{os.path.splitext(original_name)[0]}_{now_bangkok().strftime('%Y%m%d_%H%M%S')}.json"
+    json_filename = f"{os.path.splitext(original_name)[0]}_{now_bangkok().strftime('%Y%m%d_%H%M%S_%f')}.json"
     json_path = os.path.join(save_dir, json_filename)
 
     with open(json_path, 'w', encoding='utf-8') as f:
@@ -259,7 +259,7 @@ async def process_files(files: List[UploadFile] = File(...)):
     os.makedirs("input_video", exist_ok=True)
 
     results = []
-    now_str = now_bangkok().strftime("%Y%m%d_%H%M%S")
+    now_str = now_bangkok().strftime("%Y%m%d_%H%M%S_%f")
 
     for file in files:
         filename = file.filename
@@ -378,7 +378,7 @@ async def receive_stock_json(request: Request):
         raise HTTPException(status_code=400, detail="Missing required data fields")
 
     pond_id = data['pond_id']
-    timestamp = now_bangkok().strftime('%Y%m%d_%H%M%S')
+    timestamp = now_bangkok().strftime('%Y%m%d_%H%M%S_%f')
     filename = f"pond_{pond_id}_{timestamp}.json"
     file_path = os.path.join(DATA_PONDS_DIR, filename)
 
@@ -762,6 +762,7 @@ def read_json(path: str):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("main:app", host="0.0.0.0", port=port)
+
 
 
 
