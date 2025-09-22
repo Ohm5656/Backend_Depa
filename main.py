@@ -649,13 +649,17 @@ async def loop_build_and_push(pond_id: int):
             din_path, din_d = _latest_json_in_dir(FS_DIN_DIR, pond_id=pond_id)
             if din_d:
                 last_seen_data["din"] = din_d
+                
+            status_json = build_pond_status_json(pond_id)   # สร้างไฟล์ pond_status.json
+            size_json   = build_shrimp_size_json(pond_id)   # สร้างไฟล์ shrimp_size.json
 
-            status_json = build_pond_status_json(pond_id)
-            if APP_STATUS_URL and _has_status_payload(status_json):
+            # --- ส่งออกเสมอ ไม่สนว่าข้อมูลครบหรือไม่ ---
+            if APP_STATUS_URL:
+                print("📤 Sending pond_status_json:", status_json)
                 _send_json_to(APP_STATUS_URL, status_json)
 
-            size_json = build_shrimp_size_json(pond_id)
-            if APP_SIZE_URL and _has_size_payload(size_json):
+            if APP_SIZE_URL:
+                print("📤 Sending shrimp_size_json:", size_json)
                 _send_json_to(APP_SIZE_URL, size_json)
 
         except Exception as e:
