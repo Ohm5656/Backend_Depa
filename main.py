@@ -736,8 +736,10 @@ def read_json(path: str):
         return data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error reading JSON: {e}")
-
-
+    
+@app.get("/")
+def health_check():
+    return {"status": "ok"}
 # =========================
 # 7) ENTRYPOINT
 # =========================
