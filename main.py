@@ -622,10 +622,14 @@ def build_shrimp_size_json(pond_id: int) -> dict:
 # =========================
 # 5) BACKGROUND LOOP
 # =========================
+last_sent_status = None
+last_sent_size = None
+
 async def loop_build_and_push(pond_id: int):
-    global last_seen_data
+    global last_seen_data, last_sent_status, last_sent_size
     while True:
         try:
+            # โหลดข้อมูลล่าสุด
             sensor_path, sensor_d = _latest_json_in_dir(FS_SENSOR_DIR, pond_id=pond_id)
             if sensor_d:
                 last_seen_data["sensor"] = sensor_d
@@ -649,23 +653,27 @@ async def loop_build_and_push(pond_id: int):
             din_path, din_d = _latest_json_in_dir(FS_DIN_DIR, pond_id=pond_id)
             if din_d:
                 last_seen_data["din"] = din_d
-                
-            status_json = build_pond_status_json(pond_id)   # สร้างไฟล์ pond_status.json
-            size_json   = build_shrimp_size_json(pond_id)   # สร้างไฟล์ shrimp_size.json
 
-            # --- ส่งออกเสมอ ไม่สนว่าข้อมูลครบหรือไม่ ---
-            if APP_STATUS_URL:
+            # 📝 build json ทุกครั้ง
+            status_json = build_pond_status_json(pond_id)
+            size_json   = build_shrimp_size_json(pond_id)
+
+            # 📤 ส่งก็ต่อเมื่อมีข้อมูลใหม่ (ไม่สนว่าครบหรือไม่ครบ field)
+            if APP_STATUS_URL and status_json != last_sent_status:
                 print("📤 Sending pond_status_json:", status_json)
                 _send_json_to(APP_STATUS_URL, status_json)
+                last_sent_status = status_json
 
-            if APP_SIZE_URL:
+            if APP_SIZE_URL and size_json != last_sent_size:
                 print("📤 Sending shrimp_size_json:", size_json)
                 _send_json_to(APP_SIZE_URL, size_json)
+                last_sent_size = size_json
 
         except Exception as e:
             print("🚨 Loop error:", e)
 
         await asyncio.sleep(5)
+
 
 
 # =========================
