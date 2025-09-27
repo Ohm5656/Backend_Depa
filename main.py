@@ -243,14 +243,6 @@ def save_json_result(result_type, original_name,
             "weight_avg_g": weight_avg_g,
             "image_url": result_data.get("output_image")
         }
-    
-    # ✅ ส่งการแจ้งเตือนเมื่อพบกุ้งลอยผิวน้ำ
-    if result_type == "shrimp" and text_content and "🆗 ไม่พบกุ้งลอยผิวน้ำในภาพนี้" not in text_content:
-        pond_id = result_data.get("pond_number")
-        if pond_id:
-            image_url = result_data.get("output_image")
-            raw_image_url = result_data.get("raw_input_image")
-            send_shrimp_alert_notification(pond_id, raw_image_url, image_url)
 
     save_dir = os.path.join(LOCAL_STORAGE_BASE, result_type)
     os.makedirs(save_dir, exist_ok=True)
@@ -271,86 +263,6 @@ def extract_pond_id_from_filename(filename):
     if match:
         return int(match.group(1))
     return None
-
-# ------------------------------------------------------------------------------------
-# Helper: Login และส่ง Push Notification
-# ------------------------------------------------------------------------------------
-def login_and_get_token():
-    """Login เพื่อรับ access token"""
-    login_url = "https://web-production-7909d.up.railway.app/api/v1/auth/login"
-    login_data = "username=0812345678&password=admin123"
-    
-    try:
-        response = requests.post(
-            login_url,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            data=login_data,
-            timeout=10
-        )
-        
-        if response.status_code == 200:
-            result = response.json()
-            return result.get("access_token")
-        else:
-            print(f"❌ Login failed: {response.status_code} - {response.text}")
-            return None
-            
-    except Exception as e:
-        print(f"❌ Login error: {e}")
-        return None
-
-def send_shrimp_alert_notification(pond_id, image_url, output_image_url):
-    """ส่งการแจ้งเตือนเมื่อพบกุ้งลอยผิวน้ำ"""
-    
-    # 1. Login เพื่อรับ token
-    access_token = login_and_get_token()
-    if not access_token:
-        print("❌ Cannot get access token for push notification")
-        return False
-    
-    # 2. สร้างข้อมูลการแจ้งเตือน
-    # ใช้ output_image_url เป็นหลัก (รูปที่ประมวลผลแล้ว) ถ้าไม่มีใช้ image_url (รูปต้นฉบับ)
-    final_image_url = output_image_url or image_url
-    
-    alert_data = {
-        "user_id": 1,
-        "title": "พบกุ้งลอยบนผิวน้ำ!!!",
-        "body": f"ตรวจพบกุ้งลอยบนผิวน้ำในบ่อที่ {pond_id} ควรตรวจสอบทันที",
-        "image": final_image_url,
-        "url": final_image_url,
-        "tag": "shrimp-alert",
-        "data": {
-            "pond_id": str(pond_id),
-            "timestamp": format_timestamp(),
-            "alert_type": f"ShrimpOnWater-{pond_id}",
-            "severity": "high"
-        }
-    }
-    
-    # 3. ส่งการแจ้งเตือน
-    push_url = "https://web-production-7909d.up.railway.app/api/v1/push/send"
-    
-    try:
-        response = requests.post(
-            push_url,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {access_token}"
-            },
-            json=alert_data,
-            timeout=10
-        )
-        
-        if response.status_code == 200:
-            print(f"✅ Shrimp alert notification sent successfully for pond {pond_id}")
-            return True
-        else:
-            print(f"❌ Push notification failed: {response.status_code} - {response.text}")
-            return False
-            
-    except Exception as e:
-        print(f"❌ Push notification error: {e}")
-        return False
 
 def get_latest_pond_info_for_pond(data_ponds_dir, pond_id):
     pond_files = glob.glob(os.path.join(data_ponds_dir, f"pond_{pond_id}_*.json"))
@@ -448,7 +360,7 @@ async def process_files(files: List[UploadFile] = File(...)):
                     raise HTTPException(status_code=400, detail="ชื่อไฟล์ไม่ถูกต้อง")
 
             # Video
-            elif ext in [".mp4", ".avi", ".mov"]:
+            elif ext in [".mp4", ".avi", ".mov",".mpeg4"]:
                 pond_id = extract_pond_id_from_filename(filename_lower)
                 if pond_id is None:
                     raise HTTPException(status_code=400, detail="ไม่พบ pond_id ในชื่อไฟล์!")
