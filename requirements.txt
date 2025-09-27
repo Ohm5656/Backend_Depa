@@ -4,7 +4,7 @@ requests==2.31.0
 numpy==1.26.4
 pillow==10.2.0
 
-# Use CPU wheel
+# ใช้ตัว CPU wheel
 torch==2.5.1+cpu
 torchvision==0.20.1+cpu
 --extra-index-url https://download.pytorch.org/whl/cpu
@@ -17,3 +17,4 @@ aiofiles==23.2.1
 imageio==2.34.1
 python-multipart==0.0.9
 opencv-python-headless==4.10.0.84
+imageio[ffmpeg]
