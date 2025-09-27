@@ -16,6 +16,7 @@ shrimp_moved_once = set()
 movement_status = {}
 CONFIDENCE_THRESHOLD = 0.5
 
+
 def analyze_video(input_path, original_name: str = None):
     if not os.path.exists(input_path):
         print(f"❌ ไม่พบวิดีโอ: {input_path}")
@@ -28,18 +29,51 @@ def analyze_video(input_path, original_name: str = None):
     output_video_path = os.path.join(output_dir, f"{base_name}.mp4")
     output_txt_path = os.path.join(output_dir, f"{base_name}.txt")
 
-    reader = imageio.get_reader(input_path)
-    fps = reader.get_meta_data().get("fps", 25)
-    size = reader.get_meta_data().get("size", None)
+    # ===============================
+    # พยายามเปิดวิดีโอด้วย imageio
+    # ===============================
+    try:
+        reader = imageio.get_reader(input_path)
+        meta = reader.get_meta_data()
+        fps = meta.get("fps", 25)
+        size = meta.get("size", None)
+    except Exception as e:
+        print(f"⚠️ imageio เปิดไม่ได้: {e}")
+        reader, fps, size = None, None, None
 
+    # ===============================
+    # ถ้า imageio ใช้ไม่ได้ → ใช้ OpenCV
+    # ===============================
     if size is None:
-        print("❌ ไม่สามารถอ่านขนาดวิดีโอ")
-        return
+        cap = cv2.VideoCapture(input_path)
+        if not cap.isOpened():
+            print("❌ ทั้ง imageio และ OpenCV ไม่สามารถเปิดวิดีโอได้")
+            return
+
+        fps = cap.get(cv2.CAP_PROP_FPS) or 25
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        size = (width, height)
+
+        # ทำ generator เอา frame จาก OpenCV
+        def frame_generator_cv2(path):
+            cap = cv2.VideoCapture(path)
+            while cap.isOpened():
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                yield cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            cap.release()
+
+        reader = frame_generator_cv2(input_path)
 
     width, height = size
     writer = imageio.get_writer(output_video_path, fps=fps)
     prev_positions = {}
 
+    # ===============================
+    # วน loop frame
+    # ===============================
     for frame in reader:
         frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
@@ -86,9 +120,14 @@ def analyze_video(input_path, original_name: str = None):
 
         writer.append_data(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
 
-    reader.close()
+    # ปิด writer/reader
+    if hasattr(reader, "close"):
+        reader.close()
     writer.close()
 
+    # ===============================
+    # สรุปผล
+    # ===============================
     total = len(prev_positions)
     moved = len(shrimp_moved_once)
     moved_percent = (moved / total) * 100 if total > 0 else 0
