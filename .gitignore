@@ -1,0 +1,82 @@
+# Local development files
+.env.local
+.env
+local_storage/
+data_ponds/
+output/
+input_raspi1/
+input_raspi2/
+input_video/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Model files (if too large)
+# *.pt
+# *.pth
+# *.onnx
+
+# Test files
+test_*.jpg
+test_*.png
+test_*.mp4
+
+# Sample images (don't push test images)
+*_pond1_20250101_120000_20250101_120000.jpg
+*_pond1_20250101_120000_20250101_120000.png
+*_noshrimp.png
+25.2
+
+# Local development files (optional - can be pushed for team collaboration)
+# local_config.py
+# main_local.py
+# run_local.py
+# README_LOCAL.md
