@@ -448,7 +448,7 @@ async def process_files(files: List[UploadFile] = File(...)):
                     raise HTTPException(status_code=400, detail="ชื่อไฟล์ไม่ถูกต้อง")
 
             # Video
-            elif ext in [".mp4", ".avi", ".mov"]:
+            elif ext in [".mp4", ".avi", ".mov",".mpeg4"]:
                 pond_id = extract_pond_id_from_filename(filename_lower)
                 if pond_id is None:
                     raise HTTPException(status_code=400, detail="ไม่พบ pond_id ในชื่อไฟล์!")
