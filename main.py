@@ -20,6 +20,9 @@ from process.din import analyze_video
 from process.water import analyze_water
 from local_storage import LocalStorage
 
+from auto_dose import process_auto_dose   # 🟢 เพิ่มบรรทัดนี้
+
+
 # =============== FastAPI และ CORS ====================
 app = FastAPI()
 
@@ -481,14 +484,26 @@ async def process_files(files: List[UploadFile] = File(...)):
                     )
                     results.append({"type": "shrimp_size", "filename": filename, "json": json_path})
 
-                # Water
+                        # Water
                 elif "water" in filename_lower:
                     input_path = os.path.join("input_raspi2", f"water_pond{pond_id}_{now_str}{ext}")
                     with open(input_path, "wb") as f:
                         f.write(content)
-
+                
                     output_img_path, output_txt_path = analyze_water(input_path)
-
+                
+                    # 🟢 อ่านค่า sensor ล่าสุดมาใช้ร่วมกับ auto_dose
+                    sensor_path, sensor_d = _latest_json_in_dir(FS_SENSOR_DIR, pond_id=pond_id)
+                    if sensor_d:
+                        ph = float(sensor_d.get("ph", 7))
+                        temp = float(sensor_d.get("temperature", 28))
+                        do = float(sensor_d.get("do", 5))
+                    else:
+                        ph, temp, do = 7, 28, 5
+                
+                    pond_size_rai = 1.0
+                    process_auto_dose(pond_id, pond_size_rai, ph, temp, do, last_dose={})
+                
                     json_path = save_json_result(
                         result_type="water",
                         original_name=filename,
@@ -499,8 +514,6 @@ async def process_files(files: List[UploadFile] = File(...)):
                     )
                     results.append({"type": "water_image", "filename": filename, "json": json_path})
 
-                else:
-                    raise HTTPException(status_code=400, detail="ชื่อไฟล์ไม่ถูกต้อง")
 
             # Video
             elif ext in [".mp4", ".avi", ".mov",".mpeg4"]:
@@ -584,7 +597,17 @@ async def receive_sensor_data(request: Request):
         raise HTTPException(status_code=500, detail=f"Failed to save sensor data: {e}")
 
     print(f"✅ Saved sensor JSON: {file_path}")
+
+    # 🟢 เรียก auto_dose หลังบันทึกข้อมูล
+    pond_id = int(data["pond_id"])
+    ph = float(data["ph"])
+    temp = float(data["temperature"])
+    do = float(data["do"])
+    pond_size_rai = 1.0   # 👉 กำหนดเองหรืออ่านจาก pond_xxx.json
+    process_auto_dose(pond_id, pond_size_rai, ph, temp, do, last_dose={})
+
     return {"status": "success", "saved_file": file_path}
+
 
 # -----------------------------------------------------------------------------
 # [Railway] เพิ่ม entrypoint สำหรับรันด้วยพอร์ตที่ Railway กำหนดผ่าน ENV PORT
@@ -994,3 +1017,4 @@ async def startup_event():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("main:app", host="0.0.0.0", port=port)
+
