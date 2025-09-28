@@ -181,18 +181,18 @@ def on_message(client, userdata, msg):
         print(f"[ERROR] on_message: {e}")
 
 def setup_mqtt():
-    client = mqtt.Client()
+    # ใช้ WebSocket
+    client = mqtt.Client(transport="websockets")
+    client.ws_set_options(path="/mqtt")
     client.on_message = on_message
 
-    # ====== Callback เมื่อเชื่อมต่อสำเร็จ ======
     def on_connect(client, userdata, flags, rc):
         if rc == 0:
-            print("✅ MQTT connected")
+            print("✅ MQTT connected (WebSocket)")
             client.subscribe(TOPIC_STATUS)
         else:
             print("❌ MQTT connect failed, rc=", rc)
 
-    # ====== Callback เมื่อหลุดการเชื่อมต่อ ======
     def on_disconnect(client, userdata, rc):
         print("⚠️ MQTT disconnected, trying to reconnect...")
         while True:
@@ -208,10 +208,11 @@ def setup_mqtt():
     client.on_connect = on_connect
     client.on_disconnect = on_disconnect
 
-    # ====== Connect ครั้งแรก ======
-    client.connect(MQTT_BROKER, MQTT_PORT, 60)
+    # ====== Connect ครั้งแรก (ใช้ port 8083) ======
+    client.connect("broker.emqx.io", 8083, 60)
     client.loop_start()
     return client
+
 
 
 mqttc = setup_mqtt()
@@ -291,3 +292,4 @@ if __name__ == "__main__":
     print("✅ Backend started. Waiting for MQTT messages...")
     while True:
         time.sleep(5)
+
