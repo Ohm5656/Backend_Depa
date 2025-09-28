@@ -14,7 +14,7 @@ NO_MOVE_THRESHOLD = 2000
 LIGHT_MOVE_THRESHOLD = 2500
 shrimp_moved_once = set()
 movement_status = {}
-CONFIDENCE_THRESHOLD = 0.2
+CONFIDENCE_THRESHOLD = 0.5
 
 
 def analyze_video(input_path, original_name: str = None):
@@ -145,4 +145,5 @@ def analyze_video(input_path, original_name: str = None):
     print(f"✅ บันทึกวิดีโอที่: {output_video_path}")
     print(f"📄 บันทึกผลข้อความที่: {output_txt_path}")
     return output_video_path, output_txt_path
+
 
