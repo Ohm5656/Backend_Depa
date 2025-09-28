@@ -5,375 +5,289 @@ import time
 from datetime import datetime, timedelta
 import paho.mqtt.client as mqtt
 import glob
+import requests   # ✅ ยิง HTTP POST ไปแอป
 
 # ================= CONFIG =================
-RADIUS_CM = 6.5
-HEIGHT_CM = 6.5
-BULK_DENSITY = 0.8        # g/cm³ ความหนาแน่นของสารผง
-LIQUID_PER_ROUND = 750
+# คาลิเบรต: cm -> grams
+REF_POWDER = [
+    (0.0,  20000.0),   # 0cm (เต็ม)   -> 300 g
+    (5.0,  15000.0),
+    (10.0, 10000.0),
+    (25.0, 0.0)      # 15cm (หมด)   -> 0 g
+]
+
+# ✅ ค่าเริ่มต้นน้ำเต็มถัง (กำหนดเองตามขนาดถังจริง)
+FULL_WATER_ML = [2000.0, 2000.0]   # [Probiotic, Green]
+
+# ตัวแปรเก็บสถานะน้ำคงเหลือ (เริ่มเต็ม)
+current_water_ml = FULL_WATER_ML.copy()
+
+# ✅ ค่าคาลิเบรตอัตราปั๊ม (ยังคงไว้ใช้ในฟังก์ชัน auto_dose)
+LIQUID_RATE = 50.0  # ml/sec
 
 MQTT_BROKER = "broker.emqx.io"
-MQTT_PORT = 1883
-TOPIC_CMD = "pond/doser/cmd"       # backend → Arduino
-TOPIC_STATUS = "pond/doser/status" # Arduino → backend (ส่ง ultrasonic)
+MQTT_PORT   = 1883
+TOPIC_CMD   = "pond/doser/cmd"
+TOPIC_STATUS= "pond/doser/status"
 
-# ✅ Path (Windows ใช้ full path, Railway ใช้ relative)
-SENSOR_BASE = os.environ.get("SENSOR_BASE", "/data/local_storage/sensor")
-POND_INFO_BASE = os.environ.get("POND_INFO_BASE", "/data/data_ponds")
-TXT_WATER_DIR = os.environ.get("TXT_WATER_DIR", "/data/output/water_output")
-SAN_BASE = os.environ.get("SAN_BASE", "/data/local_storage/san")
+# ✅ Path
+SENSOR_BASE     = os.environ.get("SENSOR_BASE", "/data/local_storage/sensor")
+POND_INFO_BASE  = os.environ.get("POND_INFO_BASE", "/data/data_ponds")
+TXT_WATER_DIR   = os.environ.get("TXT_WATER_DIR", "/data/output/water_output")
+SAN_BASE        = os.environ.get("SAN_BASE", "/data/local_storage/san")
 os.makedirs(SAN_BASE, exist_ok=True)
 
-# =================================================
-# ฟังก์ชันคำนวณสารที่เหลือ
-# =================================================
-def calc_remaining(distance_cm):
-    """
-    คำนวณน้ำหนักสารที่เหลือ (g) โดยเทียบเชิงเส้นจากค่าที่กำหนด
-    ยิ่ง distance_cm มาก → ของเหลือน้อย
-    ตัวอย่าง: ที่ 5 cm = 200 g, ที่ 10 cm = 100 g
-    """
-    # ✅ กำหนดค่าอ้างอิงเอง
-    ref_points = {
-        5: 200.0,   # 5 cm → 200 g
-        10: 100.0,  # 10 cm → 100 g
-        0: 300.0,   # 0 cm (เต็ม) → 300 g
-        15: 0.0     # 15 cm (หมด) → 0 g
-    }
+# ✅ Endpoint แอป (อ่านจาก ENV)
+APP_ENDPOINT_STATUS = os.environ.get("APP_STATUS_URL", "http://localhost:8000/api/sensor")
+APP_ENDPOINT_ALERT  = os.environ.get("APP_ALERT_URL", "http://localhost:8000/api/alert")
 
-    # ถ้าวัดได้ตรงกับที่กำหนดพอดี
-    if distance_cm in ref_points:
-        return ref_points[distance_cm]
 
-    # หา 2 จุดที่ครอบระยะนี้
-    keys = sorted(ref_points.keys())
-    for i in range(len(keys) - 1):
-        x1, x2 = keys[i], keys[i + 1]
-        if x1 <= distance_cm <= x2:
-            y1, y2 = ref_points[x1], ref_points[x2]
-            # ✅ คำนวณแบบ linear interpolation (บัญญัติไตรยางค์)
-            weight = y1 + (y2 - y1) * (distance_cm - x1) / (x2 - x1)
-            return round(weight, 1)
-
-    # ถ้าเกินช่วง → คืน 0
+# ===== Helpers: linear interpolation =====
+def interp_from_points(points, x):
+    """points: [(x0,y0), (x1,y1), ...]"""
+    pts = sorted(points, key=lambda t: t[0])
+    if x <= pts[0][0]:   return pts[0][1]
+    if x >= pts[-1][0]:  return pts[-1][1]
+    for i in range(len(pts)-1):
+        x1,y1 = pts[i]
+        x2,y2 = pts[i+1]
+        if x1 <= x <= x2:
+            if x2 == x1: return y1
+            ratio = (x - x1) / (x2 - x1)
+            return y1 + (y2 - y1) * ratio
     return 0.0
 
+# ===== Water AI (.txt) =====
+def read_latest_txt(txt_dir):
+    txt_files = sorted(glob.glob(os.path.join(txt_dir, "*.txt")),
+                       key=os.path.getmtime, reverse=True)
+    if txt_files:
+        with open(txt_files[0], "r", encoding="utf-8") as f:
+            return f.read().strip(), txt_files[0]
+    return "", ""
 
+def should_dose_green_extract(txt):
+    t = txt.lower()
+    return ("clear" in t) or ("น้ำใส" in t) or ("ใสเกิน" in t)
+
+# ===== MQTT handlers =====
 def handle_san_status(data):
     """
-    รับ ultrasonic จาก Arduino → คำนวณสารเหลือ → บันทึก JSON
-    Example payload:
-    {
-      "pond_id": 1,
-      "distances": [3.2, 4.0, 2.5, 6.5]
-    }
+    data example from Arduino:
+      {
+        "pond_id":1,
+        "powder_distances":[d_caco3, d_mgso4],
+        "water_levels":[remain_probiotic_ml, remain_green_ml]  # น้ำคงเหลือจริง (ml)
+      }
     """
     try:
-        pond_id = data.get("pond_id", 1)
-        distances = data.get("distances", [])
+        pond_id   = data.get("pond_id", 1)
+        powder    = data.get("powder_distances", [])
+        water_lv  = data.get("water_levels", [])
 
-        if not distances or len(distances) != 4:
-            print("[WARN] ข้อมูล ultrasonic ไม่ครบ 4 ช่อง")
-            return
+                # 👉 ผง: แปลง cm -> kg + flag
+        powder_flags = []
+        remain_powder_kg = []
+        for d in powder:
+            try:
+                val = float(d)
+                powder_flags.append(1 if val > 15 else 0)
+                remain_powder_kg.append(round(interp_from_points(REF_POWDER, val) / 1000, 1))
+            except:
+                powder_flags.append(0)
+                remain_powder_kg.append(0.0)
 
-        # สร้าง remaining_list แบบใหม่: [number, number, string, string]
-        remaining_list = []
-        for i, d in enumerate(distances):
-            if i < 2:  # กล่องที่ 1-2: คำนวณน้ำหนัก
-                remaining_list.append(calc_remaining(d))
-            else:  # กล่องที่ 3-4: ใช้ string (true/false)
-                remaining_list.append("true" if d < 10.0 else "false")  # ถ้าระยะทาง < 10cm = มีสาร
+        # 👉 น้ำ: ตอนนี้ Arduino คำนวณมาให้แล้ว = น้ำคงเหลือจริง (ml)
+        water_remaining = []
+        water_flags = []
+        for val in water_lv:
+            try:
+                remain = float(val)
+                water_remaining.append(remain)
+                water_flags.append(1 if remain < 200 else 0)   # ✅ ใกล้หมด
+            except:
+                water_remaining.append(0.0)
+                water_flags.append(1)  # ถ้าอ่านไม่ได้ก็ถือว่า error → ใกล้หมด
 
         record = {
             "timestamp": datetime.now().isoformat(),
             "pond_id": pond_id,
-            "distances_cm": distances,
-            "remaining_g": remaining_list
+            "powder_distances": powder,              # raw cm
+            "powder_remaining_kg": remain_powder_kg, # kg
+            "powder_flags": powder_flags,            # 0/1
+            "water_remaining_L": water_remaining,   # ml
+            "water_flags": water_flags               # ✅ 0/1
         }
 
+
+        # ====== Save log ======
         save_path = os.path.join(
             SAN_BASE, f"san_{pond_id}_{datetime.now().strftime('%Y%m%dT%H%M%S')}.json"
         )
         with open(save_path, "w", encoding="utf-8") as f:
             json.dump(record, f, ensure_ascii=False, indent=2)
 
-        print(f"[SAVE] ✅ บันทึกไฟล์ {save_path}")
-        print(f"   → สารเหลือในแต่ละกล่อง: {remaining_list}")
-        print(f"   → กล่อง 1-2: น้ำหนัก (g), กล่อง 3-4: สถานะ (true/false)")
+        # ====== Save ไฟล์ล่าสุด ======
+        sent_path = os.path.join(SAN_BASE, "sent_san.json")
+        with open(sent_path, "w", encoding="utf-8") as f:
+            json.dump(record, f, ensure_ascii=False, indent=2)
+
+        print(f"[SAVE] ✅ {save_path}")
+        print(f"[UPDATE] 📤 {sent_path}")
+        print(f"       powder_g={remain_powder_kg}, water_ml={water_remaining}")
+
+        # ====== ส่งข้อมูลไปแอป ======
+        try:
+            res = requests.post(APP_ENDPOINT_STATUS, json=record, timeout=5)
+            print(f"[APP] 📡 Sent to status endpoint, code={res.status_code}")
+        except Exception as e:
+            print(f"[APP ERROR] ส่งข้อมูลล่าสุดไม่สำเร็จ: {e}")
+
+        # ====== ส่ง alert ถ้าบางช่องใกล้หมด ======
+        if any(flag == 1 for flag in powder_flags) or any(flag == 1 for flag in water_flags):
+            alert_payload = {
+                "user_id": 1,
+                "title": "⚠️ พบสาร/น้ำบางถังใกล้หมด",
+                "body": "ตรวจสอบสาร/น้ำในถังโดยด่วน",
+                "image": "https://drive.google.com/xxx",
+                "url": "https://drive.google.com/xxx",
+                "tag": "shrimp-alert",
+                "data": {
+                    "pond_id": str(pond_id),
+                    "timestamp": record["timestamp"],
+                    "alert_type": "Item-runout",
+                    "severity": "high",
+                    "powder_remaining_kg": remain_powder_kg,
+                    "water_remaining_L": water_remaining
+                }
+            }
+            try:
+                res = requests.post(APP_ENDPOINT_ALERT, json=alert_payload, timeout=5)
+                print(f"[APP] 🚨 Alert sent, code={res.status_code}")
+            except Exception as e:
+                print(f"[APP ERROR] ส่ง alert ไม่สำเร็จ: {e}")
 
     except Exception as e:
         print(f"[ERROR] handle_san_status: {e}")
 
-# =================================================
-# MQTT setup
-# =================================================
+
 def on_message(client, userdata, msg):
     try:
         payload = msg.payload.decode("utf-8")
         data = json.loads(payload)
-        print(f"[MQTT] 📩 รับจาก {msg.topic}: {data}")
-
-        if "distances" in data:
+        if "powder_distances" in data:
             handle_san_status(data)
-
     except Exception as e:
         print(f"[ERROR] on_message: {e}")
 
 def setup_mqtt():
     client = mqtt.Client()
     client.on_message = on_message
+
+    # ====== Callback เมื่อเชื่อมต่อสำเร็จ ======
+    def on_connect(client, userdata, flags, rc):
+        if rc == 0:
+            print("✅ MQTT connected")
+            client.subscribe(TOPIC_STATUS)
+        else:
+            print("❌ MQTT connect failed, rc=", rc)
+
+    # ====== Callback เมื่อหลุดการเชื่อมต่อ ======
+    def on_disconnect(client, userdata, rc):
+        print("⚠️ MQTT disconnected, trying to reconnect...")
+        while True:
+            try:
+                client.reconnect()
+                print("✅ MQTT reconnected")
+                client.subscribe(TOPIC_STATUS)
+                break
+            except Exception as e:
+                print("❌ reconnect failed:", e)
+                time.sleep(5)
+
+    client.on_connect = on_connect
+    client.on_disconnect = on_disconnect
+
+    # ====== Connect ครั้งแรก ======
     client.connect(MQTT_BROKER, MQTT_PORT, 60)
-    client.subscribe(TOPIC_STATUS)
     client.loop_start()
     return client
 
+
 mqttc = setup_mqtt()
 
-# =================================================
-# ฟังก์ชัน auto_dose (เดิม)
-# =================================================
-def get_powder_weight_per_round():
-    volume = math.pi * (RADIUS_CM ** 2) * HEIGHT_CM
-    return volume * BULK_DENSITY
+# ===== Dosing (ฟังก์ชันเก่ายังอยู่ครบ) =====
+def calc_powder_rounds_per_gram(radius_cm=6.5, height_cm=6.5, bulk_density=0.8):
+    vol_per_round_cm3 = math.pi * (radius_cm**2) * height_cm
+    grams_per_round   = vol_per_round_cm3 * bulk_density
+    return grams_per_round
 
-def calc_powder_rounds(grams):
-    return grams / get_powder_weight_per_round()
+def calc_powder_rounds(grams, grams_per_round=None):
+    if grams_per_round is None:
+        grams_per_round = calc_powder_rounds_per_gram()
+    if grams_per_round <= 0: return 0
+    return grams / grams_per_round
 
-def calc_liquid_rounds(ml):
-    return ml / LIQUID_PER_ROUND
+def calc_liquid_time(ml, rate_ml_per_sec=LIQUID_RATE):
+    if rate_ml_per_sec <= 0: return 0
+    return ml / rate_ml_per_sec
 
 def send_servo_command(rounds_array, pond_id=1):
-    cmd = {
-        "type": "dose_servo",
-        "pond_id": pond_id,
-        "rounds": [int(round(x)) for x in rounds_array],
-        "speed": 1.0
-    }
-    try:
-        mqttc.publish(TOPIC_CMD, json.dumps(cmd), qos=1)
-        print(f"[MQTT] ✅ ส่งคำสั่งเซอร์โว: {cmd}")
-    except Exception as e:
-        print(f"[ERROR] MQTT publish ล้มเหลว: {e}")
+    cmd = {"type": "dose_servo", "pond_id": pond_id,
+           "rounds": [int(round(x)) for x in rounds_array]}
+    mqttc.publish(TOPIC_CMD, json.dumps(cmd), qos=1)
+    print(f"[MQTT] ✅ dose_servo {cmd}")
 
-def should_dose_green_extract(txt):
-    txt = txt.lower()
-    return "clear" in txt or "น้ำใส" in txt or "ใสเกิน" in txt
+def send_pump_command(durations_array, pond_id=1):
+    cmd = {"type": "dose_pump", "pond_id": pond_id,
+           "durations": [int(round(x)) for x in durations_array]}
+    mqttc.publish(TOPIC_CMD, json.dumps(cmd), qos=1)
+    print(f"[MQTT] ✅ dose_pump {cmd}")
 
-def read_latest_txt(txt_dir):
-    txt_files = sorted(glob.glob(os.path.join(txt_dir, "*.txt")), key=os.path.getmtime, reverse=True)
-    if txt_files:
-        with open(txt_files[0], "r", encoding="utf-8") as f:
-            return f.read().strip(), txt_files[0]
-    return "", ""
+def read_latest_txt_and_flag():
+    ai_txt, _ = read_latest_txt(TXT_WATER_DIR)
+    return ai_txt, should_dose_green_extract(ai_txt)
 
-def get_pond_info(pond_id):
-    pond_files = sorted(
-        glob.glob(os.path.join(POND_INFO_BASE, f"pond_{pond_id}_*.json")),
-        key=os.path.getmtime, reverse=True
-    )
-    if not pond_files:
-        print(f"[DEBUG] ❗ ไม่พบไฟล์ข้อมูลบ่อ pond_{pond_id}_*.json")
-        return None
-    with open(pond_files[0], "r", encoding="utf-8") as f:
-        pond_info = json.load(f)
-    print(f"[DEBUG] โหลดข้อมูลบ่อ pond_{pond_id} จาก {os.path.basename(pond_files[0])}")
-    return pond_info
+def process_auto_dose(pond_id, pond_size_rai, ph, temp, do, last_dose, now=None):
+    if now is None: now = datetime.now()
+    servo_rounds   = [0, 0]  # [CaCO3, MgSO4]
+    pump_durations = [0, 0]  # [Probiotic, Green]
 
-def process_auto_dose(pond_id, pond_size_rai, ph, temp, do, last_dose, txt_dir, now=None):
-    if now is None:
-        now = datetime.now()
-    print(f"\n=== [DEBUG] ตรวจสอบบ่อ {pond_id} | ขนาด {pond_size_rai} ไร่ ===")
-    print(f"เวลาปัจจุบัน: {now.isoformat()}")
-    print(f"ค่าเซ็นเซอร์: pH={ph} | temp={temp} | DO={do}")
+    # Probiotic -> ทุก 7 วัน
+    if (now - last_dose.get("probiotic", now - timedelta(days=8))) > timedelta(days=7):
+        ml = 200 * float(pond_size_rai)
+        pump_durations[0] = int(round(calc_liquid_time(ml)))
 
-    ai_txt, _ = read_latest_txt(txt_dir)
-    water_clear = should_dose_green_extract(ai_txt)
-    print(f"[AI TXT] วิเคราะห์สีน้ำ: {ai_txt} | water_clear={water_clear}")
+    # CaCO3 -> pH < 6.8
+    if ph < 6.8:
+        grams = 2500 * float(pond_size_rai)
+        servo_rounds[0] = int(round(calc_powder_rounds(grams)))
 
-    # --- กำหนดเวลา ---
-    hour = now.hour
-    valid_morning_evening = (6 <= hour <= 8) or (16 <= hour <= 18)  # เช้า+เย็น
-    valid_evening = (16 <= hour <= 18)  # เย็นอย่างเดียว
+    # MgSO4 -> temp > 30
+    if temp > 30:
+        grams = 2500 * float(pond_size_rai)
+        servo_rounds[1] = int(round(calc_powder_rounds(grams)))
 
-    # --- เวลาโดสล่าสุด ---
-    def get_dt(name, default):
-        try:
-            return datetime.fromisoformat(last_dose[name])
-        except Exception:
-            return now - default
+    # Green Extract -> "น้ำใส"
+    ai_txt, water_clear = read_latest_txt_and_flag()
+    if water_clear:
+        ml = 150 * float(pond_size_rai)
+        pump_durations[1] = int(round(calc_liquid_time(ml)))
 
-    last_probiotic = get_dt("probiotic", timedelta(days=8))
-    last_caco3 = get_dt("caco3", timedelta(hours=12))
-    last_mgso4 = get_dt("mgso4", timedelta(days=3))
-    last_green_extract = get_dt("green_extract", timedelta(hours=24))
+    if any(servo_rounds):   send_servo_command(servo_rounds, pond_id)
+    if any(pump_durations): send_pump_command(pump_durations, pond_id)
 
-    # --- เตรียม array เก็บรอบหมุนเซอร์โว ---
-    rounds_array = [0, 0, 0, 0]
-    dosing_report = []
+    print(f"[ACTION] pond={pond_id} servo={servo_rounds} pump={pump_durations} ai='{ai_txt}'")
 
-    # 1. โปรไบโอติก (ช่อง 0): ทุก 7 วัน
-    if (now - last_probiotic) > timedelta(days=7) and valid_morning_evening:
-        grams = 5 * float(pond_size_rai)  # 5 กรัมต่อไร่
-        rounds = calc_powder_rounds(grams)
-        rounds_array[0] = int(round(rounds))
-        print(f"[ROUTINE] โปรไบโอติก {grams:.1f} g → {int(round(rounds))} รอบ")
-        dosing_report.append(f"โปรไบโอติก {grams:.1f} g ({int(round(rounds))} รอบ)")
-
-    # 2. CaCO₃ (ช่อง 1): ถ้า pH < 6.8
-    if ph < 6.8 and (now - last_caco3) > timedelta(hours=8) and valid_morning_evening:
-        grams = 2.5 * 1000 * float(pond_size_rai)  # 2.5 กก. ต่อไร่
-        rounds = calc_powder_rounds(grams)
-        rounds_array[1] = int(round(rounds))
-        print(f"[ALERT] pH={ph} < 6.8 → CaCO₃ {grams:.1f} g → {int(round(rounds))} รอบ")
-        dosing_report.append(f"CaCO₃ {grams:.1f} g ({int(round(rounds))} รอบ)")
-
-    # 3. MgSO₄ (ช่อง 2): ถ้า temp > 30°C
-    if temp > 30 and (now - last_mgso4) > timedelta(days=2) and valid_evening:
-        grams = 2.5 * 1000 * float(pond_size_rai)  # 2.5 กก. ต่อไร่
-        rounds = calc_powder_rounds(grams)
-        rounds_array[2] = int(round(rounds))
-        print(f"[ALERT] Temp={temp} > 30°C → MgSO₄ {grams:.1f} g → {int(round(rounds))} รอบ")
-        dosing_report.append(f"MgSO₄ {grams:.1f} g ({int(round(rounds))} รอบ)")
-
-    # 4. น้ำหมักพืชสีเขียว (ช่อง 3): ถ้าน้ำใสเกินหรือ pH < 6.8
-    if (water_clear or ph < 6.8) and (now - last_green_extract) > timedelta(hours=20) and valid_morning_evening:
-        ml = 150 * float(pond_size_rai)  # 150 ml ต่อไร่
-        rounds = calc_liquid_rounds(ml)
-        rounds_array[3] = int(round(rounds))
-        cause = "น้ำใสเกิน" if water_clear else f"pH={ph} ต่ำ"
-        print(f"[ALERT] {cause} → น้ำหมัก {ml:.1f} ml → {int(round(rounds))} รอบ")
-        dosing_report.append(f"น้ำหมัก {ml:.1f} ml ({int(round(rounds))} รอบ)")
-
-    # --- ส่งคำสั่งไปยัง Arduino ถ้ามีสารต้องปล่อย ---
-    if any(rounds_array):
-        send_servo_command(rounds_array, pond_id)
-        print("[ACTION] ✅ ปล่อยสาร:", dosing_report)
-    else:
-        print("[ACTION] ❌ ไม่มีสารที่ต้องปล่อยในรอบนี้")
-
-    return {
-        "status": "success" if any(rounds_array) else "normal",
-        "pond_id": pond_id,
-        "pond_size_rai": pond_size_rai,
-        "ph": ph,
-        "temp": temp,
-        "do": do,
-        "auto_dosed": dosing_report,
-        "rounds_array": rounds_array,
-        "water_ai_txt": ai_txt
-    }
-
-# =================================================
-# Monitor sensor + water
-# =================================================
-def monitor_sensor_and_water():
-    print("=== [START] Monitor Sensor/Water File (FLAT sensor folder, check by pond_id) ===")
-    last_txt_file = None
-    pond_sensor_checked = {}  # pond_id -> set(sensor_file_names)
-
-    while True:
-        print(f"\n===== Loop @ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} =====")
-        # 1. Trigger จาก .txt สีน้ำ
-        ai_txt, ai_txt_path = read_latest_txt(TXT_WATER_DIR)
-        if ai_txt_path and ai_txt_path != last_txt_file and should_dose_green_extract(ai_txt):
-            print(f"\n[TRIGGER] พบ .txt สีน้ำใหม่ ({os.path.basename(ai_txt_path)}) -> น้ำใส! (trigger ปล่อยน้ำหมัก)")
-            # trigger ทุกบ่อ
-            sensor_files = sorted(glob.glob(os.path.join(SENSOR_BASE, "sensor_*.json")), key=os.path.getmtime, reverse=True)
-            pond_ids = set()
-            for sf in sensor_files:
-                with open(sf, "r", encoding="utf-8") as f:
-                    d = json.load(f)
-                pond_ids.add(str(d.get("pond_id", "1")))
-            now = datetime.now()
-            for pond_id in pond_ids:
-                pond_info = get_pond_info(pond_id)
-                pond_size_rai = pond_info.get("pond_size_rai", 1.0) if pond_info else 1.0
-                ph, temp, do = 7, 29, 6
-                last_dose = {
-                    "probiotic": now - timedelta(days=8),
-                    "caco3": now - timedelta(hours=12),
-                    "mgso4": now - timedelta(days=3),
-                    "green_extract": now - timedelta(hours=24),
-                }
-                process_auto_dose(
-                    pond_id=pond_id,
-                    pond_size_rai=pond_size_rai,
-                    ph=ph,
-                    temp=temp,
-                    do=do,
-                    last_dose=last_dose,
-                    txt_dir=TXT_WATER_DIR,
-                    now=now
-                )
-            last_txt_file = ai_txt_path
-
-        # 2. Trigger sensor abnormal 5 ไฟล์ล่าสุดของแต่ละบ่อ
-        sensor_files = sorted(glob.glob(os.path.join(SENSOR_BASE, "sensor_*.json")), key=os.path.getmtime, reverse=True)
-        pond_files_map = {}
-        for sf in sensor_files:
-            with open(sf, "r", encoding="utf-8") as f:
-                d = json.load(f)
-            pond_id = str(d.get("pond_id", "1"))
-            pond_files_map.setdefault(pond_id, []).append(sf)
-
-        for pond_id, pond_files in pond_files_map.items():
-            if len(pond_files) < 5:
-                print(f"[DEBUG] pond_id={pond_id} มีไฟล์ sensor น้อยกว่า 5")
-                continue
-            # ห้าไฟล์ล่าสุดของบ่อนี้
-            recent_files = pond_files[:5]
-            sensor_set = tuple(os.path.basename(f) for f in recent_files)
-            if pond_id in pond_sensor_checked and pond_sensor_checked[pond_id] == sensor_set:
-                continue  # checked
-            ph_list, temp_list, do_list = [], [], []
-            all_ph_low = True
-            all_temp_high = True
-            all_do_low = True
-            print(f"[DEBUG] {pond_id}: sensor set {[os.path.basename(f) for f in recent_files]}")
-            for i, jf in enumerate(recent_files):
-                with open(jf, "r", encoding="utf-8") as f:
-                    d = json.load(f)
-                ph = float(d.get("ph", 7))
-                temp = float(d.get("temperature", 29))
-                do = float(d.get("do", 6))
-                ph_list.append(ph)
-                temp_list.append(temp)
-                do_list.append(do)
-                print(f"    [{i+1}] {os.path.basename(jf)} | ph={ph} temp={temp} do={do}")
-                if ph >= 6.8:
-                    all_ph_low = False
-                if temp <= 30:
-                    all_temp_high = False
-                if do >= 5.0:
-                    all_do_low = False
-            print(f"    all_ph_low={all_ph_low}, all_temp_high={all_temp_high}, all_do_low={all_do_low}")
-            should_dose = all_ph_low or all_temp_high or all_do_low
-            print(f"    should_dose={should_dose}")
-            if should_dose:
-                pond_info = get_pond_info(pond_id)
-                pond_size_rai = pond_info.get("pond_size_rai", 1.0) if pond_info else 1.0
-                now = datetime.now()
-                last_dose = {
-                    "probiotic": now - timedelta(days=8),
-                    "caco3": now - timedelta(hours=12),
-                    "mgso4": now - timedelta(days=3),
-                    "green_extract": now - timedelta(hours=24),
-                }
-                print(f"\n[TRIGGER] Sensor abnormal 5 ไฟล์ล่าสุด {pond_id} → ปล่อยสาร")
-                process_auto_dose(
-                    pond_id=pond_id,
-                    pond_size_rai=pond_size_rai,
-                    ph=ph_list[0],
-                    temp=temp_list[0],
-                    do=do_list[0],
-                    last_dose=last_dose,
-                    txt_dir=TXT_WATER_DIR,
-                    now=now
-                )
-                pond_sensor_checked[pond_id] = sensor_set
-            else:
-                print(f"[DEBUG] {pond_id}: sensor ยังไม่เข้าเงื่อนไขผิดปกติ 5 ไฟล์ล่าสุด")
-        time.sleep(5)
-# =================================================
+# ===== Demo run =====
 if __name__ == "__main__":
-    monitor_sensor_and_water()
+    last_dose = {
+        "probiotic":    datetime.now() - timedelta(days=8),
+        "caco3":        datetime.now() - timedelta(hours=12),
+        "mgso4":        datetime.now() - timedelta(days=3),
+        "green_extract":datetime.now() - timedelta(hours=24),
+    }
+    process_auto_dose(pond_id=1, pond_size_rai=1.0, ph=6.5, temp=31, do=5, last_dose=last_dose)
+    print("✅ Backend started. Waiting for MQTT messages...")
+    while True:
+        time.sleep(5)
