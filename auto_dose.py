@@ -86,28 +86,31 @@ def handle_san_status(data):
         water_lv  = data.get("water_levels", [])
 
                 # 👉 ผง: แปลง cm -> kg + flag
+       # 👉 ผง: แปลง cm -> kg + flag
         powder_flags = []
         remain_powder_kg = []
         for d in powder:
             try:
                 val = float(d)
-                powder_flags.append(1 if val > 15 else 0)
                 remain_powder_kg.append(round(interp_from_points(REF_POWDER, val) / 1000, 1))
+                # ✅ ถ้าเกิน 15 cm แปลว่าผงใกล้หมด → "true"
+                powder_flags.append("true" if val > 15 else "false")
             except:
-                powder_flags.append(0)
                 remain_powder_kg.append(0.0)
-
-        # 👉 น้ำ: ตอนนี้ Arduino คำนวณมาให้แล้ว = น้ำคงเหลือจริง (ml)
+                powder_flags.append("true")  # ถ้า error → ถือว่าใกล้หมด
+        
+        # 👉 น้ำ: Arduino ส่งมาเป็น L
         water_remaining = []
         water_flags = []
         for val in water_lv:
             try:
                 remain = float(val)
                 water_remaining.append(remain)
-                water_flags.append(1 if remain < 200 else 0)   # ✅ ใกล้หมด
+                # ✅ ถ้าเหลือน้อยกว่า 2 L → ใกล้หมด
+                water_flags.append("true" if remain < 2.0 else "false")
             except:
                 water_remaining.append(0.0)
-                water_flags.append(1)  # ถ้าอ่านไม่ได้ก็ถือว่า error → ใกล้หมด
+                water_flags.append("true")  # error → ถือว่าใกล้หมด
 
         record = {
             "timestamp": datetime.now().isoformat(),
@@ -299,5 +302,6 @@ if __name__ == "__main__":
     print("✅ Backend started. Waiting for MQTT messages...")
     while True:
         time.sleep(5)
+
 
 
