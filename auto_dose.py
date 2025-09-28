@@ -76,7 +76,13 @@ def handle_san_status(data):
             print("[WARN] ข้อมูล ultrasonic ไม่ครบ 4 ช่อง")
             return
 
-        remaining_list = [calc_remaining(d) for d in distances]
+        # สร้าง remaining_list แบบใหม่: [number, number, string, string]
+        remaining_list = []
+        for i, d in enumerate(distances):
+            if i < 2:  # กล่องที่ 1-2: คำนวณน้ำหนัก
+                remaining_list.append(calc_remaining(d))
+            else:  # กล่องที่ 3-4: ใช้ string (true/false)
+                remaining_list.append("true" if d < 10.0 else "false")  # ถ้าระยะทาง < 10cm = มีสาร
 
         record = {
             "timestamp": datetime.now().isoformat(),
@@ -92,7 +98,8 @@ def handle_san_status(data):
             json.dump(record, f, ensure_ascii=False, indent=2)
 
         print(f"[SAVE] ✅ บันทึกไฟล์ {save_path}")
-        print(f"   → สารเหลือในแต่ละกล่อง (g): {remaining_list}")
+        print(f"   → สารเหลือในแต่ละกล่อง: {remaining_list}")
+        print(f"   → กล่อง 1-2: น้ำหนัก (g), กล่อง 3-4: สถานะ (true/false)")
 
     except Exception as e:
         print(f"[ERROR] handle_san_status: {e}")

@@ -643,11 +643,18 @@ def build_pond_status_json(pond_id: int) -> dict:
             "do": sensor_d.get("do"),
         }
 
-    minerals = {"Mineral_1": 0.0, "Mineral_2": 0.0, "Mineral_3": 0.0, "Mineral_4": 0.0}
+    minerals = {"Mineral_1": 0.0, "Mineral_2": 0.0, "Mineral_3": "false", "Mineral_4": "false"}
     if san_d:
         arr = san_d.get("remaining_g") or []
         for i in range(4):
-            minerals[f"Mineral_{i+1}"] = float(arr[i]) if i < len(arr) else 0.0
+            if i < len(arr):
+                if i < 2:  # กล่องที่ 1-2: ใช้ค่าตัวเลข (น้ำหนัก)
+                    minerals[f"Mineral_{i+1}"] = float(arr[i]) if isinstance(arr[i], (int, float)) else 0.0
+                else:  # กล่องที่ 3-4: ใช้ค่า string (สถานะ)
+                    if isinstance(arr[i], str):
+                        minerals[f"Mineral_{i+1}"] = arr[i]  # ใช้ค่า string โดยตรง
+                    else:
+                        minerals[f"Mineral_{i+1}"] = "true" if arr[i] else "false"
 
     water_image = None
     water_color = "unknown"
@@ -701,7 +708,7 @@ def build_shrimp_size_json(pond_id: int) -> dict:
         "Size_gram": weight_g,
         "SizePic": size_image,
         "PicFood": raw_image or size_image,
-        "PicKungDinn": video_url
+        "PicKungDin": video_url
     }
     with open(SHRIMP_SIZE_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
