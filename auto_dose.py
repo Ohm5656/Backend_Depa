@@ -111,26 +111,26 @@ def handle_san_status(data):
             except:
                 water_remaining.append(0.0)
                 water_flags.append("true")  # error → ถือว่าใกล้หมด
-
+            
             record = {
                 "timestamp": datetime.now().isoformat(),
                 "pond_id": pond_id,
             
-                # ✅ ผง (kg)
-                "Mineral_1": remain_powder_kg[0] if len(remain_powder_kg) > 0 else 0,
-                "Mineral_2": remain_powder_kg[1] if len(remain_powder_kg) > 1 else 0,
+                # ✅ ส่งออกแบบ array ให้ main.py ใช้ตรง ๆ
+                "remaining_g": [
+                    remain_powder_kg[0] if len(remain_powder_kg) > 0 else 0.0,    # Mineral_1 (kg)
+                    remain_powder_kg[1] if len(remain_powder_kg) > 1 else 0.0,    # Mineral_2 (kg)
+                    water_flags[0] if len(water_flags) > 0 else "false",          # Mineral_3 (true/false)
+                    water_flags[1] if len(water_flags) > 1 else "false",          # Mineral_4 (true/false)
+                ],
             
-                # ✅ น้ำ (L)
-                "Mineral_3": water_remaining[0] if len(water_remaining) > 0 else 0,
-                "Mineral_4": water_remaining[1] if len(water_remaining) > 1 else 0,
-            
-                # ✅ Flags (true/false)
-                "Flag_Mineral_1": powder_flags[0] if len(powder_flags) > 0 else "false",
-                "Flag_Mineral_2": powder_flags[1] if len(powder_flags) > 1 else "false",
-                "Flag_Mineral_3": water_flags[0] if len(water_flags) > 0 else "false",
-                "Flag_Mineral_4": water_flags[1] if len(water_flags) > 1 else "false",
+                # 👉 debug/backup fields (ไม่บังคับ แต่ช่วยเวลา test)
+                "powder_remaining_kg": remain_powder_kg,
+                "water_remaining_L": water_remaining,
+                "powder_flags": powder_flags,
+                "water_flags": water_flags,
             }
-
+            
 
 
 
@@ -314,6 +314,7 @@ if __name__ == "__main__":
     print("✅ Backend started. Waiting for MQTT messages...")
     while True:
         time.sleep(5)
+
 
 
 
