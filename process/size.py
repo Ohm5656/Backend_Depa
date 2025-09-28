@@ -110,8 +110,23 @@ def analyze_shrimp(input_path, total_larvae=None, pond_number=None,
     print(f"\n🦐 พบกุ้งทั้งหมด: {len(shrimp_data)} ตัว")
     for idx,(x,y,length_cm,weight_g) in enumerate(shrimp_data,start=1):
         print(f" - Shrimp {idx}: {length_cm:.2f} cm / {weight_g:.2f} g")
-        cv2.putText(img,f"{idx}",(int(x),int(y)-15),cv2.FONT_HERSHEY_SIMPLEX,0.7,(0,0,255),2,cv2.LINE_AA)
-        cv2.putText(img,f"{weight_g:.1f}g",(int(x),int(y)+15),cv2.FONT_HERSHEY_SIMPLEX,0.5,(0,255,255),1,cv2.LINE_AA)
+
+        # วาดเลข ID (แดง)
+        cv2.putText(
+            img, f"{idx}",
+            (int(x), int(y)-15),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+            (0,0,255), 2, cv2.LINE_AA
+        )
+
+        # วาดความยาว cm (ฟ้าเหมือนเส้น)
+        cv2.putText(
+            img, f"{length_cm:.2f}cm",
+            (int(x), int(y)+15),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+            (255,0,0), 1, cv2.LINE_AA
+        )
+
         output_lines.append(f"Shrimp {idx}: {length_cm:.2f} cm / {weight_g:.2f} g")
 
     count = len(shrimp_data)
@@ -147,3 +162,4 @@ def analyze_shrimp(input_path, total_larvae=None, pond_number=None,
     print(f"✅ บันทึกผลลัพธ์: {output_txt_path_output}\n")
 
     return output_img_path_output, output_txt_path_output
+
