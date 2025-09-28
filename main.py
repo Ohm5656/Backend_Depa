@@ -3,6 +3,7 @@ import shutil
 import os
 import uuid
 import json
+import time
 from typing import List
 from datetime import datetime, timedelta, timezone
 import requests
@@ -352,6 +353,60 @@ def send_shrimp_alert_notification(pond_id, image_url, output_image_url):
         print(f"❌ Push notification error: {e}")
         return False
 
+def send_device_offline_notification(device_id, pond_id):
+    """ส่งการแจ้งเตือนเมื่อ device offline"""
+    
+    # 1. Login เพื่อรับ token
+    access_token = login_and_get_token()
+    if not access_token:
+        print("❌ Cannot get access token for offline notification")
+        return False
+    
+    # 2. สร้างข้อมูลการแจ้งเตือน
+    alert_data = {
+        "user_id": 1,
+        "title": "ยอกุ้งดับเรียบร้อยแล้ว",
+        "body": "ยอกุ้งดับเรียบร้อยแล้ว ตรวจสอบยอกุ้งด่วน!!!",
+        "icon": "/icons/icon-192x192.png",
+        "badge": "/icons/icon-72x72.png",
+        "url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTIM0syGxE_4zEiuWSroBXGlfRIcdIXR97v2Q&s",
+        "tag": "general-notification",
+        "data": {
+            "type": "info",
+            "source": "system",
+            "device_id": device_id,
+            "pond_id": str(pond_id),
+            "timestamp": format_timestamp(),
+            "alert_type": f"DeviceOffline-{device_id}",
+            "severity": "high"
+        }
+    }
+    
+    # 3. ส่งการแจ้งเตือน
+    push_url = "https://web-production-7909d.up.railway.app/api/v1/push/send"
+    
+    try:
+        response = requests.post(
+            push_url,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {access_token}"
+            },
+            json=alert_data,
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            print(f"✅ Device offline notification sent successfully for {device_id}")
+            return True
+        else:
+            print(f"❌ Push notification failed: {response.status_code} - {response.text}")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Push notification error: {e}")
+        return False
+
 def get_latest_pond_info_for_pond(data_ponds_dir, pond_id):
     pond_files = glob.glob(os.path.join(data_ponds_dir, f"pond_{pond_id}_*.json"))
     if not pond_files:
@@ -519,33 +574,16 @@ async def receive_sensor_data(request: Request):
     if not all(k in data for k in required_keys):
         raise HTTPException(status_code=400, detail="Missing required fields")
 
-    # ✅ ตั้งชื่อไฟล์ sensor
     filename = f"sensor_{now_bangkok().strftime('%Y%m%dT%H%M%S%f')}.json"
     file_path = os.path.join(SENSOR_DIR, filename)
 
-    # ✅ บันทึก sensor JSON
     try:
-        with open(file_path, "w", encoding="utf-8") as f:
+        with open(file_path, "w", encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save sensor data: {e}")
 
     print(f"✅ Saved sensor JSON: {file_path}")
-
-    # ✅ เรียก auto_dose ต่อทันที
-    try:
-        process_auto_dose(
-            pond_id=data["pond_id"],
-            pond_size_rai=1.0,               # กำหนดค่าไร่คงที่ (แก้ได้)
-            ph=float(data["ph"]),
-            temp=float(data["temperature"]),
-            do=float(data["do"]),
-            last_dose={}                     # กำหนด empty dict สำหรับ demo
-        )
-        print("✅ Auto_dose executed after sensor save")
-    except Exception as e:
-        print(f"❌ Auto_dose error: {e}")
-
     return {"status": "success", "saved_file": file_path}
 
 # -----------------------------------------------------------------------------
@@ -642,6 +680,13 @@ last_seen_data = {
     "size": None,
     "din": None
 }
+
+# =========================
+# HEARTBEAT MONITORING
+# =========================
+# เก็บข้อมูล heartbeat ของแต่ละ device
+device_heartbeats = {}
+HEARTBEAT_TIMEOUT = 10  # วินาที
 
 # =========================
 # 4) BUILDERS
@@ -747,10 +792,36 @@ def _strip_timestamp(d: dict) -> dict:
     d_copy.pop("timestamp", None)
     return d_copy
 
+async def check_device_heartbeats():
+    """ตรวจสอบ device heartbeat และส่งการแจ้งเตือนถ้า offline"""
+    global device_heartbeats
+    
+    current_time = time.time()
+    offline_devices = []
+    
+    for device_id, last_heartbeat_time in device_heartbeats.items():
+        if current_time - last_heartbeat_time > HEARTBEAT_TIMEOUT:
+            offline_devices.append(device_id)
+    
+    # ส่งการแจ้งเตือนสำหรับ device ที่ offline
+    for device_id in offline_devices:
+        # ดึง pond_id จาก device_id (format: raspi_pond_1)
+        try:
+            pond_id = int(device_id.split('_')[-1])
+            print(f"🚨 Device {device_id} is offline! Sending notification...")
+            send_device_offline_notification(device_id, pond_id)
+            # ลบ device ที่ offline ออกจากรายการ
+            del device_heartbeats[device_id]
+        except (ValueError, IndexError):
+            print(f"⚠️ Cannot parse pond_id from device_id: {device_id}")
+
 async def loop_build_and_push(pond_id: int):
     global last_seen_data, last_sent_status, last_sent_size
     while True:
         try:
+            # ตรวจสอบ device heartbeats
+            await check_device_heartbeats()
+            
             # โหลดข้อมูลล่าสุด
             sensor_path, sensor_d = _latest_json_in_dir(FS_SENSOR_DIR, pond_id=pond_id)
             if sensor_d:
@@ -873,6 +944,35 @@ def read_json(path: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error reading JSON: {e}")
     
+@app.post("/heartbeat")
+async def receive_heartbeat(request: Request):
+    """รับ heartbeat จาก Raspberry Pi"""
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+    
+    required_keys = ["device_id", "status", "timestamp", "pond_id"]
+    if not all(k in data for k in required_keys):
+        raise HTTPException(status_code=400, detail="Missing required fields")
+    
+    device_id = data["device_id"]
+    status = data["status"]
+    timestamp = data["timestamp"]
+    pond_id = data["pond_id"]
+    
+    # อัพเดทเวลาล่าสุดที่ได้รับ heartbeat
+    device_heartbeats[device_id] = time.time()
+    
+    print(f"💓 Received heartbeat from {device_id} (pond {pond_id}) at {timestamp}")
+    
+    return {
+        "status": "success", 
+        "message": f"Heartbeat received from {device_id}",
+        "device_id": device_id,
+        "pond_id": pond_id
+    }
+
 @app.get("/")
 def health_check():
     return {"status": "ok"}
@@ -894,4 +994,3 @@ async def startup_event():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("main:app", host="0.0.0.0", port=port)
-
