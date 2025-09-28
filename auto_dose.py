@@ -147,7 +147,8 @@ def handle_san_status(data):
             print(f"[APP ERROR] ส่งข้อมูลล่าสุดไม่สำเร็จ: {e}")
 
         # ====== ส่ง alert ถ้าบางช่องใกล้หมด ======
-        if any(flag == 1 for flag in powder_flags) or any(flag == 1 for flag in water_flags):
+        if any(flag == "true" for flag in powder_flags) or any(flag == "true" for flag in water_flags):
+
             alert_payload = {
                 "user_id": 1,
                 "title": "⚠️ พบสาร/น้ำบางถังใกล้หมด",
@@ -184,7 +185,7 @@ def on_message(client, userdata, msg):
         print(f"[ERROR] on_message: {e}")
 
 def setup_mqtt():
-    client = mqtt.Client()
+    client = mqtt.Client(transport="websockets")
     client.on_message = on_message
 
     # ====== Callback เมื่อเชื่อมต่อสำเร็จ ======
@@ -302,6 +303,7 @@ if __name__ == "__main__":
     print("✅ Backend started. Waiting for MQTT messages...")
     while True:
         time.sleep(5)
+
 
 
 
