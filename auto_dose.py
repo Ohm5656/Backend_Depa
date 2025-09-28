@@ -68,7 +68,7 @@ def read_latest_txt(txt_dir):
 
 def should_dose_green_extract(txt):
     t = txt.lower()
-    return ("clear" in t) or ("น้ำใส" in t) or ("ใสเกิน" in t)
+    return ("สีขาว" in t) or ("น้ำใส" in t) or ("ใสเกิน" in t)
 
 # ===== MQTT handlers =====
 def handle_san_status(data):
@@ -314,6 +314,7 @@ if __name__ == "__main__":
     print("✅ Backend started. Waiting for MQTT messages...")
     while True:
         time.sleep(5)
+
 
 
 
