@@ -38,7 +38,7 @@ SAN_BASE        = os.environ.get("SAN_BASE", "/data/local_storage/san")
 os.makedirs(SAN_BASE, exist_ok=True)
 
 # ✅ Endpoint แอป (อ่านจาก ENV)
-APP_ENDPOINT_STATUS = os.environ.get("APP_STATUS_URL", "http://localhost:8000/api/sensor")
+APP_ENDPOINT_STATUS = os.environ.get("APP_SAN_URL", "http://localhost:8000/api/sensor")
 APP_ENDPOINT_ALERT  = os.environ.get("APP_ALERT_URL", "http://localhost:8000/api/alert")
 
 
@@ -112,15 +112,26 @@ def handle_san_status(data):
                 water_remaining.append(0.0)
                 water_flags.append("true")  # error → ถือว่าใกล้หมด
 
-        record = {
-            "timestamp": datetime.now().isoformat(),
-            "pond_id": pond_id,
-            "powder_distances": powder,              # raw cm
-            "powder_remaining_kg": remain_powder_kg, # kg
-            "powder_flags": powder_flags,            # 0/1
-            "water_remaining_L": water_remaining,   # ml
-            "water_flags": water_flags               # ✅ 0/1
-        }
+            record = {
+                "timestamp": datetime.now().isoformat(),
+                "pond_id": pond_id,
+            
+                # ✅ ผง (kg)
+                "Mineral_1": remain_powder_kg[0] if len(remain_powder_kg) > 0 else 0,
+                "Mineral_2": remain_powder_kg[1] if len(remain_powder_kg) > 1 else 0,
+            
+                # ✅ น้ำ (L)
+                "Mineral_3": water_remaining[0] if len(water_remaining) > 0 else 0,
+                "Mineral_4": water_remaining[1] if len(water_remaining) > 1 else 0,
+            
+                # ✅ Flags (true/false)
+                "Flag_Mineral_1": powder_flags[0] if len(powder_flags) > 0 else "false",
+                "Flag_Mineral_2": powder_flags[1] if len(powder_flags) > 1 else "false",
+                "Flag_Mineral_3": water_flags[0] if len(water_flags) > 0 else "false",
+                "Flag_Mineral_4": water_flags[1] if len(water_flags) > 1 else "false",
+            }
+
+
 
 
         # ====== Save log ======
@@ -303,6 +314,7 @@ if __name__ == "__main__":
     print("✅ Backend started. Waiting for MQTT messages...")
     while True:
         time.sleep(5)
+
 
 
 
