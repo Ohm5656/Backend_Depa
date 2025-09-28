@@ -519,16 +519,33 @@ async def receive_sensor_data(request: Request):
     if not all(k in data for k in required_keys):
         raise HTTPException(status_code=400, detail="Missing required fields")
 
+    # ✅ ตั้งชื่อไฟล์ sensor
     filename = f"sensor_{now_bangkok().strftime('%Y%m%dT%H%M%S%f')}.json"
     file_path = os.path.join(SENSOR_DIR, filename)
 
+    # ✅ บันทึก sensor JSON
     try:
-        with open(file_path, "w", encoding='utf-8') as f:
+        with open(file_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save sensor data: {e}")
 
     print(f"✅ Saved sensor JSON: {file_path}")
+
+    # ✅ เรียก auto_dose ต่อทันที
+    try:
+        process_auto_dose(
+            pond_id=data["pond_id"],
+            pond_size_rai=1.0,               # กำหนดค่าไร่คงที่ (แก้ได้)
+            ph=float(data["ph"]),
+            temp=float(data["temperature"]),
+            do=float(data["do"]),
+            last_dose={}                     # กำหนด empty dict สำหรับ demo
+        )
+        print("✅ Auto_dose executed after sensor save")
+    except Exception as e:
+        print(f"❌ Auto_dose error: {e}")
+
     return {"status": "success", "saved_file": file_path}
 
 # -----------------------------------------------------------------------------
@@ -877,3 +894,4 @@ async def startup_event():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("main:app", host="0.0.0.0", port=port)
+
