@@ -674,7 +674,7 @@ def build_pond_status_json(pond_id: int) -> dict:
         }
 
     # ส่วนแร่ธาตุ/สาร
-    minerals = {"Mineral_1": 0.0, "Mineral_2": 0.0, "Mineral_3": "false", "Mineral_4": "false"}
+    minerals = {"Mineral_1": 0.0, "Mineral_2": 0.0, "Mineral_3": "0.0", "Mineral_4": "0.0"}
     if san_d:
         arr = san_d.get("remaining_g") or []
         for i in range(4):
@@ -684,7 +684,7 @@ def build_pond_status_json(pond_id: int) -> dict:
                     minerals[f"Mineral_{i+1}"] = float(arr[i]) if isinstance(arr[i], (int, float)) else 0.0
                 else:
                     # กล่อง 3-4: สถานะเป็นสตริง
-                    if isinstance(arr[i], str):
+                    if isinstance(arr[i], float):
                         minerals[f"Mineral_{i+1}"] = arr[i]
                     else:
                         minerals[f"Mineral_{i+1}"] = "true" if arr[i] else "false"
@@ -1054,5 +1054,6 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=port)
+
 
 
