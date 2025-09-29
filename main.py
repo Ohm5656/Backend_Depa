@@ -37,6 +37,10 @@ app.add_middleware(
 )
 
 STORAGE_DIR = Path(os.environ.get("STORAGE_DIR", "/data/local_storage"))
+FILE_BASE_URL = os.environ.get("FILE_BASE_URL", "http://localhost:8001").rstrip("/")
+LOCAL_STORAGE_BASE = os.environ.get("LOCAL_STORAGE_BASE", "/data/local_storage")
+DATA_PONDS_DIR = os.environ.get("DATA_PONDS_DIR", "/data/data_ponds")
+
 
 (STORAGE_DIR / "size").mkdir(parents=True, exist_ok=True)
 (STORAGE_DIR / "shrimp").mkdir(parents=True, exist_ok=True)
@@ -1036,6 +1040,7 @@ async def startup_event():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("main:app", host="0.0.0.0", port=port)
+
 
 
 
