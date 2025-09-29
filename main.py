@@ -742,8 +742,8 @@ def build_shrimp_size_json(pond_id: int) -> dict:
     data = {
         "pondId": pond_id,
         "timestamp": format_timestamp(),
-        "Size_CM": round(length_cm, 2),   # ปัดทศนิยม 2 ตำแหน่ง
-        "Size_gram": round(weight_g, 2),  # ปัดทศนิยม 1 ตำแหน่ง
+        "Size_CM": length_cm,   # ปัดทศนิยม 2 ตำแหน่ง
+        "Size_gram": weight_g,  # ปัดทศนิยม 1 ตำแหน่ง
         "SizePic": size_image,
         "PicFood": raw_image or size_image,
         "PicKungDin": video_url,
@@ -1054,6 +1054,7 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=port)
+
 
 
 
