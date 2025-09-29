@@ -9,27 +9,33 @@ model = YOLO(model_path)
 output_folder = os.environ.get("OUTPUT_SHRIMP", "/data/local_storage/shrimp")
 os.makedirs(output_folder, exist_ok=True)
 
+# ตั้งค่า threshold
+CONFIDENCE_THRESHOLD = float(os.environ.get("SHRIMP_CONF", 0.7))  # ปรับค่าได้ผ่าน env, default = 0.5
+
 def analyze_kuny(image_path, original_name: str = None):
     image = cv2.imread(image_path)
     if image is None:
         raise ValueError(f"❌ ไม่พบภาพที่ path: {image_path}")
 
-    results = model.predict(image_path)
+    # เพิ่ม conf threshold
+    results = model.predict(image_path, conf=CONFIDENCE_THRESHOLD)
     shrimp_count, info_list = 0, []
 
     for r in results:
         for box in r.boxes:
             cls_id = int(box.cls[0])
+            score = float(box.conf[0])  # ค่าความมั่นใจ
             name = r.names[cls_id]
-            if name.lower() == "shrimp":
+
+            if name.lower() == "shrimp" and score >= CONFIDENCE_THRESHOLD:
                 shrimp_count += 1
-                label = f"shrimp float id{shrimp_count}"
+                label = f"shrimp float id{shrimp_count} ({score:.2f})"
                 info_list.append(label)
 
                 x1, y1, x2, y2 = box.xyxy[0].int().tolist()
                 cv2.rectangle(image, (x1, y1), (x2, y2), (255, 0, 0), 2)
                 cv2.putText(image, label, (x1, y1-10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 2.0, (255, 0, 0), 10)
+                            cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 0, 0), 3)
 
     header_text, color = ("HAVE SHRIMPS", (0, 0, 255)) if shrimp_count > 0 else ("NO SHRIMP", (0, 255, 0))
     cv2.putText(image, header_text, (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.5, color, 5)
@@ -46,3 +52,4 @@ def analyze_kuny(image_path, original_name: str = None):
 
     print("✅ ประมวลผลเสร็จ:", text)
     return image_output_path, txt_path
+
