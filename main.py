@@ -71,7 +71,6 @@ BASE_LOCAL = os.environ.get("LOCAL_STORAGE_ROOT", "/data/local_storage")
 SAN_BASE = os.path.join(BASE_LOCAL, "san")
 os.makedirs(SAN_BASE, exist_ok=True)
 
-APP_ENDPOINT_STATUS = os.environ.get("APP_SAN_URL", "http://localhost:8000/api/sensor")
 APP_ENDPOINT_ALERT  = os.environ.get("APP_ALERT_URL", "http://localhost:8000/api/alert")
 
 # ===== Helpers: linear interpolation =====
@@ -1189,5 +1188,6 @@ async def startup_event():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("main:app", host="0.0.0.0", port=port)
+
 
 
