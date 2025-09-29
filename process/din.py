@@ -4,6 +4,8 @@ from deep_sort_realtime.deepsort_tracker import DeepSort
 import numpy as np
 import imageio.v2 as imageio
 import cv2
+import torch
+from torchvision.ops import nms  # ✅ เพิ่ม NMS
 
 # โหลดโมเดลกุ้งดิ้นจากโฟลเดอร์ Model/
 model_path = os.environ.get("MODEL_DIN", os.path.join("Model", "din.pt"))
@@ -32,6 +34,7 @@ def analyze_video(input_path, original_name: str = None):
     # ===============================
     # พยายามเปิดวิดีโอด้วย imageio
     # ===============================
+    reader, fps, size = None, None, None
     try:
         reader = imageio.get_reader(input_path)
         meta = reader.get_meta_data()
@@ -39,7 +42,6 @@ def analyze_video(input_path, original_name: str = None):
         size = meta.get("size", None)
     except Exception as e:
         print(f"⚠️ imageio เปิดไม่ได้: {e}")
-        reader, fps, size = None, None, None
 
     # ===============================
     # ถ้า imageio ใช้ไม่ได้ → ใช้ OpenCV
@@ -50,7 +52,9 @@ def analyze_video(input_path, original_name: str = None):
             print("❌ ทั้ง imageio และ OpenCV ไม่สามารถเปิดวิดีโอได้")
             return
 
-        fps = cap.get(cv2.CAP_PROP_FPS) or 25
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        if fps is None or fps <= 0:
+            fps = 25
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         size = (width, height)
@@ -71,6 +75,8 @@ def analyze_video(input_path, original_name: str = None):
     writer = imageio.get_writer(output_video_path, fps=fps)
     prev_positions = {}
 
+    print(f"🎥 Processing video: {input_path}, FPS={fps}, Size={size}")
+
     # ===============================
     # วน loop frame
     # ===============================
@@ -87,9 +93,10 @@ def analyze_video(input_path, original_name: str = None):
         if len(boxes) > 0:
             boxes_tensor = torch.tensor(boxes, dtype=torch.float32)
             scores_tensor = torch.tensor(scores, dtype=torch.float32)
-            keep = nms(boxes_tensor, scores_tensor, iou_threshold=0.5)  # iou_threshold ปรับได้
-            boxes = boxes[keep.numpy()]
-            scores = scores[keep.numpy()]
+            keep = nms(boxes_tensor, scores_tensor, iou_threshold=0.5)
+            keep_idx = keep.numpy()
+            boxes = boxes[keep_idx]
+            scores = scores[keep_idx]
 
         # สร้าง detection list ให้ DeepSort
         detections = [([x1, y1, x2 - x1, y2 - y1], score, None)
@@ -133,7 +140,10 @@ def analyze_video(input_path, original_name: str = None):
 
     # ปิด writer/reader
     if hasattr(reader, "close"):
-        reader.close()
+        try:
+            reader.close()
+        except Exception:
+            pass
     writer.close()
 
     # ===============================
@@ -156,8 +166,3 @@ def analyze_video(input_path, original_name: str = None):
     print(f"✅ บันทึกวิดีโอที่: {output_video_path}")
     print(f"📄 บันทึกผลข้อความที่: {output_txt_path}")
     return output_video_path, output_txt_path
-
-
-
-
-
