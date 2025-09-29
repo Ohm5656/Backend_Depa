@@ -967,15 +967,20 @@ def list_dir(path: str = ""):
     return JSONResponse(items)
 
 from fastapi.responses import FileResponse
+import mimetypes
+
 @app.get("/view")
 def view_file(path: str):
     """
-    ดูไฟล์ที่อยู่ใน container (เช่น JSON หรือ TXT)
+    ดูไฟล์ที่อยู่ใน container (เช่น JSON, TXT, JPG, MP4)
     ใช้ query param เช่น /view?path=/data/local_storage/pond_status.json
     """
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(path, media_type="application/json")
+    
+    media_type, _ = mimetypes.guess_type(path)
+    return FileResponse(path, media_type=media_type or "application/octet-stream")
+
 
 
 
@@ -1040,6 +1045,7 @@ async def startup_event():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("main:app", host="0.0.0.0", port=port)
+
 
 
 
