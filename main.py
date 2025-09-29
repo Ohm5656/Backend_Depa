@@ -48,57 +48,7 @@ app.mount("/size",   StaticFiles(directory=str(STORAGE_DIR / "size")), name="siz
 app.mount("/shrimp", StaticFiles(directory=str(STORAGE_DIR / "shrimp")), name="shrimp")
 app.mount("/din",    StaticFiles(directory=str(STORAGE_DIR / "din")),   name="din")
 app.mount("/water",  StaticFiles(directory=str(STORAGE_DIR / "water")), name="water")
-# ------------------------------------------------------------------------------------
-# [Railway] Config พื้นฐาน
-# ------------------------------------------------------------------------------------
-FILE_BASE_URL = os.environ.get("FILE_BASE_URL", "http://localhost:8001").rstrip("/")
-LOCAL_STORAGE_BASE = os.environ.get("LOCAL_STORAGE_BASE", "/data/local_storage")
-DATA_PONDS_DIR = os.environ.get("DATA_PONDS_DIR", "/data/data_ponds")
 
-# ================= CONFIG (สาร/น้ำ) =================
-REF_POWDER = [
-    (0.0,  20000.0),   # 0 cm (เต็ม) -> 20000 g
-    (5.0,  15000.0),
-    (10.0, 10000.0),
-    (25.0, 0.0)        # 25 cm (หมด) -> 0 g
-]
-
-FULL_WATER_ML = [2000.0, 2000.0]   # [Probiotic, Green extract]
-current_water_ml = FULL_WATER_ML.copy()
-
-# SAN_BASE ใช้เก็บ log/mineral status
-BASE_LOCAL = os.environ.get("LOCAL_STORAGE_ROOT", "/data/local_storage")
-SAN_BASE = os.path.join(BASE_LOCAL, "san")
-os.makedirs(SAN_BASE, exist_ok=True)
-
-APP_ENDPOINT_ALERT  = os.environ.get("APP_ALERT_URL", "http://localhost:8000/api/alert")
-
-# ===== Helpers: linear interpolation =====
-def interp_from_points(points, x):
-    pts = sorted(points, key=lambda t: t[0])
-    if x <= pts[0][0]:   return pts[0][1]
-    if x >= pts[-1][0]:  return pts[-1][1]
-    for i in range(len(pts)-1):
-        x1,y1 = pts[i]
-        x2,y2 = pts[i+1]
-        if x1 <= x <= x2:
-            if x2 == x1: return y1
-            ratio = (x - x1) / (x2 - x1)
-            return y1 + (y2 - y1) * ratio
-    return 0.0
-
-# ===== Water AI (.txt) =====
-def read_latest_txt(txt_dir):
-    txt_files = sorted(glob.glob(os.path.join(txt_dir, "*.txt")),
-                       key=os.path.getmtime, reverse=True)
-    if txt_files:
-        with open(txt_files[0], "r", encoding="utf-8") as f:
-            return f.read().strip(), txt_files[0]
-    return "", ""
-
-def should_dose_green_extract(txt):
-    t = txt.lower()
-    return ("สีขาว" in t) or ("น้ำใส" in t) or ("ใสเกิน" in t)
 
 
 os.makedirs(LOCAL_STORAGE_BASE, exist_ok=True)
@@ -619,108 +569,6 @@ async def receive_stock_json(request: Request):
     return {"status": "success", "saved_file": file_path}
 
 
-def handle_san_status(data):
-    """
-    data example:
-      {
-        "pond_id":1,
-        "powder_distances":[d_caco3, d_mgso4],   # cm
-        "water_levels":[remain_probiotic_L, remain_green_L]  # L
-      }
-    """
-    try:
-        pond_id   = data.get("pond_id", 1)
-        powder    = data.get("powder_distances", [])
-        water_lv  = data.get("water_levels", [])
-
-        # 👉 ผง: แปลง cm -> kg
-        powder_flags = []
-        remain_powder_kg = []
-        for d in powder:
-            try:
-                val = float(d)
-                remain_powder_kg.append(round(interp_from_points(REF_POWDER, val) / 1000, 1))
-                powder_flags.append("true" if val > 15 else "false")
-            except:
-                remain_powder_kg.append(0.0)
-                powder_flags.append("true")
-
-        # 👉 น้ำ: เก็บเป็น L จริง
-        water_remaining = []
-        water_flags = []
-        for val in water_lv:
-            try:
-                remain = float(val)
-                water_remaining.append(remain)
-                water_flags.append("true" if remain < 2.0 else "false")
-            except:
-                water_remaining.append(0.0)
-                water_flags.append("true")
-
-        # ✅ บันทึกค่าที่ใช้จริง: Mineral1-2 = kg, Mineral3-4 = L
-        record = {
-            "timestamp": datetime.now().isoformat(),
-            "pond_id": pond_id,
-            "remaining": [
-                remain_powder_kg[0] if len(remain_powder_kg) > 0 else 0.0,  # Mineral_1 (kg)
-                remain_powder_kg[1] if len(remain_powder_kg) > 1 else 0.0,  # Mineral_2 (kg)
-                water_remaining[0] if len(water_remaining) > 0 else 0.0,    # Mineral_3 (L)
-                water_remaining[1] if len(water_remaining) > 1 else 0.0     # Mineral_4 (L)
-            ],
-            "powder_remaining_kg": remain_powder_kg,
-            "water_remaining_L": water_remaining,
-            "powder_flags": powder_flags,
-            "water_flags": water_flags
-        }
-
-        # ===== Save log =====
-        save_path = os.path.join(
-            SAN_BASE, f"san_{pond_id}_{datetime.now().strftime('%Y%m%dT%H%M%S')}.json"
-        )
-        with open(save_path, "w", encoding="utf-8") as f:
-            json.dump(record, f, ensure_ascii=False, indent=2)
-
-        # ===== Save latest =====
-        sent_path = os.path.join(SAN_BASE, "sent_san.json")
-        with open(sent_path, "w", encoding="utf-8") as f:
-            json.dump(record, f, ensure_ascii=False, indent=2)
-
-        print(f"[SAVE] ✅ {save_path}")
-        print(f"[UPDATE] 📤 {sent_path}")
-        print(f"       powder_kg={remain_powder_kg}, water_L={water_remaining}")
-
-        # ===== Push to App =====
-        try:
-            res = requests.post(APP_ENDPOINT_STATUS, json=record, timeout=5)
-            print(f"[APP] 📡 Sent to status endpoint, code={res.status_code}")
-        except Exception as e:
-            print(f"[APP ERROR] ส่งข้อมูลล่าสุดไม่สำเร็จ: {e}")
-
-        # ===== Alert ถ้าใกล้หมด =====
-        if any(flag == "true" for flag in powder_flags) or any(flag == "true" for flag in water_flags):
-            alert_payload = {
-                "user_id": 1,
-                "title": "⚠️ พบสาร/น้ำบางถังใกล้หมด",
-                "body": "ตรวจสอบสาร/น้ำในถังโดยด่วน",
-                "tag": "shrimp-alert",
-                "data": {
-                    "pond_id": str(pond_id),
-                    "timestamp": record["timestamp"],
-                    "alert_type": "Item-runout",
-                    "severity": "high",
-                    "powder_remaining_kg": remain_powder_kg,
-                    "water_remaining_L": water_remaining
-                }
-            }
-            try:
-                res = requests.post(APP_ENDPOINT_ALERT, json=alert_payload, timeout=5)
-                print(f"[APP] 🚨 Alert sent, code={res.status_code}")
-            except Exception as e:
-                print(f"[APP ERROR] ส่ง alert ไม่สำเร็จ: {e}")
-
-    except Exception as e:
-        print(f"[ERROR] handle_san_status: {e}")
-
 
 
 SENSOR_DIR = os.environ.get("SENSOR_DIR", "/data/local_storage/sensor")  # [Railway]
@@ -1188,6 +1036,7 @@ async def startup_event():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("main:app", host="0.0.0.0", port=port)
+
 
 
 
