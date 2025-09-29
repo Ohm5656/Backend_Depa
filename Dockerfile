@@ -22,6 +22,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+RUN apt-get update && apt-get install -y git-lfs
+RUN git lfs install
+
+
 # =========================
 # คัดลอกไฟล์ทั้งหมดเข้า container
 # =========================
