@@ -20,7 +20,7 @@ from process.din import analyze_video
 from process.water import analyze_water
 from local_storage import LocalStorage
 
-from auto_dose import process_auto_dose   # 🟢 เพิ่มบรรทัดนี้
+
 
 
 # =============== FastAPI และ CORS ====================
@@ -1188,6 +1188,7 @@ async def startup_event():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("main:app", host="0.0.0.0", port=port)
+
 
 
 
