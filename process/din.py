@@ -14,7 +14,7 @@ NO_MOVE_THRESHOLD = 2000
 LIGHT_MOVE_THRESHOLD = 2500
 shrimp_moved_once = set()
 movement_status = {}
-CONFIDENCE_THRESHOLD = 0.7
+CONFIDENCE_THRESHOLD = 0.8
 
 
 def analyze_video(input_path, original_name: str = None):
@@ -81,6 +81,17 @@ def analyze_video(input_path, original_name: str = None):
         boxes = results[0].boxes.xyxy.cpu().numpy()
         scores = results[0].boxes.conf.cpu().numpy()
 
+        # -------------------------------
+        # 🔹 ใช้ NMS กรองกล่องที่ทับกัน
+        # -------------------------------
+        if len(boxes) > 0:
+            boxes_tensor = torch.tensor(boxes, dtype=torch.float32)
+            scores_tensor = torch.tensor(scores, dtype=torch.float32)
+            keep = nms(boxes_tensor, scores_tensor, iou_threshold=0.5)  # iou_threshold ปรับได้
+            boxes = boxes[keep.numpy()]
+            scores = scores[keep.numpy()]
+
+        # สร้าง detection list ให้ DeepSort
         detections = [([x1, y1, x2 - x1, y2 - y1], score, None)
                       for (x1, y1, x2, y2), score in zip(boxes, scores)
                       if score >= CONFIDENCE_THRESHOLD]
@@ -145,6 +156,7 @@ def analyze_video(input_path, original_name: str = None):
     print(f"✅ บันทึกวิดีโอที่: {output_video_path}")
     print(f"📄 บันทึกผลข้อความที่: {output_txt_path}")
     return output_video_path, output_txt_path
+
 
 
 
