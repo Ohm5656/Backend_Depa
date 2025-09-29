@@ -708,10 +708,10 @@ def build_pond_status_json(pond_id: int) -> dict:
         "PH": sensor_part["ph"],
         "Temp": sensor_part["temperature"],
         "ColorWater": water_color,
-        "Mineral_1": minerals["Mineral_1"],
-        "Mineral_2": minerals["Mineral_2"],
-        "Mineral_3": minerals["Mineral_3"],
-        "Mineral_4": minerals["Mineral_4"],
+        "Mineral_1": "0.0",
+        "Mineral_2": "0.0",
+        "Mineral_3": "0.0",
+        "Mineral_4": "0.0",
         "PicColorWater": water_image,
         "PicKungOnWater": shrimp_float_image,
     }
@@ -1054,6 +1054,7 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=port)
+
 
 
 
