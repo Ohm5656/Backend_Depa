@@ -738,16 +738,17 @@ def build_shrimp_size_json(pond_id: int) -> dict:
     video_url = None
     if din_d:
         video_url = din_d.get("output_video")
-
+    
     data = {
         "pondId": pond_id,
         "timestamp": format_timestamp(),
-        "Size_CM": length_cm,
-        "Size_gram": weight_g,
+        "Size_CM": round(length_cm, 2),   # ปัดทศนิยม 2 ตำแหน่ง
+        "Size_gram": round(weight_g, 2),  # ปัดทศนิยม 1 ตำแหน่ง
         "SizePic": size_image,
         "PicFood": raw_image or size_image,
         "PicKungDin": video_url,
     }
+
 
     with open(SHRIMP_SIZE_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
@@ -1053,4 +1054,5 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=port)
+
 
