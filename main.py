@@ -687,7 +687,7 @@ def build_pond_status_json(pond_id: int) -> dict:
                     if isinstance(arr[i], float):
                         minerals[f"Mineral_{i+1}"] = arr[i]
                     else:
-                        minerals[f"Mineral_{i+1}"] = "true" if arr[i] else "false"
+                        minerals[f"Mineral_{i+1}"] = "0.0" if arr[i] else "0.0"
 
     # รูปสีน้ำ + สี
     water_image = None
@@ -1054,6 +1054,7 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=port)
+
 
 
 
