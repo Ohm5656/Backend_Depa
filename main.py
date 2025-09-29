@@ -1045,3 +1045,12 @@ async def startup_event():
     # สามารถแก้ pond_id ให้ dynamic ได้ตามระบบ login/หลายบ่อ
     pond_id = 1
     asyncio.create_task(loop_build_and_push(pond_id))
+
+# ==========================
+# ENTRYPOINT
+# ==========================
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8000))
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=port)
+
