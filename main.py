@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Request
+﻿from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, FileResponse
@@ -444,7 +444,7 @@ async def process_files(files: List[UploadFile] = File(...)):
                     with open(input_path, "wb") as f:
                         f.write(content)
 
-                    output_img_path, output_txt_path = analyze_kuny(input_path)
+                    output_img_path, output_txt_path = await asyncio.to_thread(analyze_kuny, input_path)
                     json_path = save_json_result(
                         result_type="shrimp",
                         original_name=filename,
@@ -461,7 +461,8 @@ async def process_files(files: List[UploadFile] = File(...)):
                     with open(input_path, "wb") as f:
                         f.write(content)
 
-                    output_img_path, output_txt_path = analyze_shrimp(
+                    output_img_path, output_txt_path = await asyncio.to_thread(
+                        analyze_shrimp,
                         input_path,
                         total_larvae=total_larvae,
                         pond_number=pond_number
@@ -483,7 +484,7 @@ async def process_files(files: List[UploadFile] = File(...)):
                     with open(input_path, "wb") as f:
                         f.write(content)
 
-                    output_img_path, output_txt_path = analyze_water(input_path)
+                    output_img_path, output_txt_path = await asyncio.to_thread(analyze_water, input_path)
 
                     # 🟢 อ่านค่า sensor ล่าสุดมาใช้ร่วมกับ auto_dose
                     sensor_path, sensor_d = _latest_json_in_dir(FS_SENSOR_DIR, pond_id=pond_id)
@@ -518,7 +519,7 @@ async def process_files(files: List[UploadFile] = File(...)):
                 with open(input_path, "wb") as f:
                     shutil.copyfileobj(file.file, f)
 
-                output_video_path, output_txt_path = analyze_video(input_path)
+                output_video_path, output_txt_path = await asyncio.to_thread(analyze_video, input_path)
                 json_path = save_json_result(
                     result_type="din",
                     original_name=filename,
@@ -652,7 +653,12 @@ last_seen_data = {
 # ==========================
 # เก็บเวลาล่าสุดที่ได้รับ heartbeat ของแต่ละ device
 device_heartbeats = {}
-HEARTBEAT_TIMEOUT = 10  # วินาที
+# ตั้งค่า timeout ผ่าน ENV ปรับค่าเริ่มต้นให้ยาวขึ้นเพื่อกัน false positive
+HEARTBEAT_TIMEOUT = int(os.environ.get("HEARTBEAT_TIMEOUT", "60"))  # วินาที
+# กำหนดจำนวนครั้งที่พลาด heartbeat ต่อเนื่องก่อนแจ้งเตือน
+OFFLINE_MISSES_REQUIRED = int(os.environ.get("OFFLINE_MISSES_REQUIRED", "3"))
+# เก็บจำนวนครั้งที่พลาด heartbeat ต่อเนื่องของแต่ละ device
+device_offline_misses = {}
 
 
 # ==========================
@@ -958,26 +964,28 @@ def _strip_timestamp(d: dict) -> dict:
 
 
 async def check_device_heartbeats():
-    """ตรวจสอบ device heartbeat และส่งการแจ้งเตือนถ้า offline"""
-    global device_heartbeats
+    """ตรวจสอบ device heartbeat และส่งการแจ้งเตือนถ้า offline พร้อม debounce"""
+    global device_heartbeats, device_offline_misses
     current_time = time.time()
-    offline_devices = []
 
     for device_id, last_heartbeat_time in list(device_heartbeats.items()):
-        if current_time - last_heartbeat_time > HEARTBEAT_TIMEOUT:
-            offline_devices.append(device_id)
-
-    # ส่งแจ้งเตือนสำหรับ device ที่ offline
-    for device_id in offline_devices:
-        try:
-            # คาดรูปแบบ device_id = raspi_pond_{N}
-            pond_id = int(device_id.split("_")[-1])
-            print(f"🚨 Device {device_id} is offline! Sending notification...")
-            send_device_offline_notification(device_id, pond_id)
-            # นำออกจากรายการ
-            del device_heartbeats[device_id]
-        except (ValueError, IndexError):
-            print(f"⚠️ Cannot parse pond_id from device_id: {device_id}")
+        is_timeout = (current_time - last_heartbeat_time) > HEARTBEAT_TIMEOUT
+        if is_timeout:
+            device_offline_misses[device_id] = device_offline_misses.get(device_id, 0) + 1
+            misses = device_offline_misses[device_id]
+            if misses >= OFFLINE_MISSES_REQUIRED:
+                try:
+                    pond_id = int(device_id.split("_")[-1])  # คาดรูปแบบ raspi_pond_{N}
+                    print(f"🚨 Device {device_id} is offline ({misses}/{OFFLINE_MISSES_REQUIRED})! Sending notification...")
+                    send_device_offline_notification(device_id, pond_id)
+                    # รีเซ็ตตัวนับหลังส่งแจ้งเตือน
+                    device_offline_misses[device_id] = 0
+                except (ValueError, IndexError):
+                    print(f"⚠️ Cannot parse pond_id from device_id: {device_id}")
+        else:
+            # ได้ heartbeat ทันเวลา รีเซ็ตตัวนับ miss
+            if device_id in device_offline_misses:
+                device_offline_misses[device_id] = 0
 
 
 async def loop_build_and_push(pond_id: int):
