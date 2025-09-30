@@ -168,9 +168,6 @@ def _has_status_payload(data: dict) -> bool:
         data.get("DO") not in (None, ""),
         data.get("PH") not in (None, ""),
         data.get("Temp") not in (None, ""),
-        bool(data.get("ColorWater") and data["ColorWater"] != "unknown"),
-        bool(data.get("PicColorWater")),
-        bool(data.get("PicKungOnWater")),
     ])
 
 def _has_size_payload(data: dict) -> bool:
@@ -1062,6 +1059,7 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=port)
+
 
 
 
