@@ -10,7 +10,7 @@ output_folder = os.environ.get("OUTPUT_SHRIMP", "/data/local_storage/shrimp")
 os.makedirs(output_folder, exist_ok=True)
 
 # ตั้งค่า threshold
-CONFIDENCE_THRESHOLD = float(os.environ.get("SHRIMP_CONF", 0.6))  # ปรับค่าได้ผ่าน env, default = 0.5
+CONFIDENCE_THRESHOLD = float(os.environ.get("SHRIMP_CONF", 0.8))  # ปรับค่าได้ผ่าน env, default = 0.5
 
 def analyze_kuny(image_path, original_name: str = None):
     image = cv2.imread(image_path)
@@ -52,5 +52,6 @@ def analyze_kuny(image_path, original_name: str = None):
 
     print("✅ ประมวลผลเสร็จ:", text)
     return image_output_path, txt_path
+
 
 
