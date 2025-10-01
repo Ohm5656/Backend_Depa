@@ -19,7 +19,6 @@ from typing import List
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import copy
-import math
 
 # ==========================
 # Imports จาก process modules
@@ -657,6 +656,8 @@ HEARTBEAT_TIMEOUT = int(os.environ.get("HEARTBEAT_TIMEOUT", "60"))  # วิน�
 OFFLINE_MISSES_REQUIRED = int(os.environ.get("OFFLINE_MISSES_REQUIRED", "3"))
 # เก็บจำนวนครั้งที่พลาด heartbeat ต่อเนื่องของแต่ละ device
 device_offline_misses = {}
+# เก็บสถานะการแจ้งเตือน offline ของแต่ละ device (เพื่อไม่ส่งซ้ำ)
+device_notification_sent = {}
 
 
 # ==========================
@@ -746,8 +747,8 @@ def build_shrimp_size_json(pond_id: int) -> dict:
     data = {
         "pondId": pond_id,
         "timestamp": format_timestamp(),
-        "Size_CM": round(length_cm,2),   # ปัดทศนิยม 2 ตำแหน่ง
-        "Size_gram": round(weight_g,2),  # ปั)ดทศนิยม 1 ตำแหน่ง
+        "Size_CM": round(length_cm, 2) if length_cm is not None else None,
+        "Size_gram": round(weight_g, 2) if weight_g is not None else None,
         "SizePic": size_image,
         "PicFood": raw_image or size_image,
         "PicKungDin": video_url,
@@ -792,51 +793,42 @@ async def receive_stock_json(request: Request):
 
 @app.post("/data")
 async def receive_sensor_data(request: Request):
-    """รับข้อมูล sensor JSON และเรียก auto_dose หลังบันทึก
-       ✅ รองรับกรณีส่งมาไม่ครบ โดยใส่ค่า default ให้
-    """
+    """รับข้อมูล sensor JSON และเรียก auto_dose หลังบันทึก"""
+    global latest_sensor_data
+    
     try:
         data = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
-    # ต้องมี pond_id อย่างน้อย
-    if "pond_id" not in data:
-        raise HTTPException(status_code=400, detail="Missing pond_id")
+    required_keys = ["pond_id", "ph", "temperature", "do", "timestamp"]
+    if not all(k in data for k in required_keys):
+        raise HTTPException(status_code=400, detail="Missing required fields")
 
-    # ✅ ใส่ค่า default ถ้าไม่ส่งมา
-    pond_id = int(data["pond_id"])
-    ph = float(data.get("ph", 7.0))          # default 7.0
-    temp = float(data.get("temperature", 28))  # default 28 °C
-    do = float(data.get("do", 5.0))          # default 5.0
-    timestamp = data.get("timestamp", format_timestamp())
-
-    # อัปเดต object ที่จะเซฟ
-    clean_data = {
-        "pond_id": pond_id,
-        "ph": ph,
-        "temperature": temp,
-        "do": do,
-        "timestamp": timestamp
-    }
-
-    # เซฟไฟล์ JSON
     filename = f"sensor_{now_bangkok().strftime('%Y%m%dT%H%M%S%f')}.json"
     file_path = os.path.join(SENSOR_DIR, filename)
 
     try:
         with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(clean_data, f, ensure_ascii=False, indent=2)
+            json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save sensor data: {e}")
 
     print(f"✅ Saved sensor JSON: {file_path}")
 
+    # 🟢 เก็บข้อมูล sensor ล่าสุดสำหรับส่งแยก
+    latest_sensor_data = data
+
     # 🟢 เรียก auto_dose หลังบันทึกข้อมูล
+    pond_id = int(data["pond_id"])
+    ph = float(data["ph"])
+    temp = float(data["temperature"])
+    do = float(data["do"])
     pond_size_rai = 1.0  # 👉 ปรับได้เอง หรืออ่านจากไฟล์ pond_xxx.json
+
     process_auto_dose(pond_id, pond_size_rai, ph, temp, do, last_dose={})
 
-    return {"status": "success", "saved_file": file_path, "data": clean_data}
+    return {"status": "success", "saved_file": file_path}
 
 
 # ==========================
@@ -965,6 +957,8 @@ def health_check():
 # ==========================
 last_sent_status = None
 last_sent_size = None
+# เก็บข้อมูล sensor ล่าสุดสำหรับส่งแยก
+latest_sensor_data = None
 
 def _strip_timestamp(d: dict) -> dict:
     """คืนค่า dict โดยตัดฟิลด์ timestamp ออก (ใช้เช็คการเปลี่ยนแปลงจริง)"""
@@ -977,7 +971,7 @@ def _strip_timestamp(d: dict) -> dict:
 
 async def check_device_heartbeats():
     """ตรวจสอบ device heartbeat และส่งการแจ้งเตือนถ้า offline พร้อม debounce"""
-    global device_heartbeats, device_offline_misses
+    global device_heartbeats, device_offline_misses, device_notification_sent
     current_time = time.time()
 
     for device_id, last_heartbeat_time in list(device_heartbeats.items()):
@@ -986,18 +980,25 @@ async def check_device_heartbeats():
             device_offline_misses[device_id] = device_offline_misses.get(device_id, 0) + 1
             misses = device_offline_misses[device_id]
             if misses >= OFFLINE_MISSES_REQUIRED:
-                try:
-                    pond_id = int(device_id.split("_")[-1])  # คาดรูปแบบ raspi_pond_{N}
-                    print(f"🚨 Device {device_id} is offline ({misses}/{OFFLINE_MISSES_REQUIRED})! Sending notification...")
-                    send_device_offline_notification(device_id, pond_id)
-                    # รีเซ็ตตัวนับหลังส่งแจ้งเตือน
-                    device_offline_misses[device_id] = 0
-                except (ValueError, IndexError):
-                    print(f"⚠️ Cannot parse pond_id from device_id: {device_id}")
+                # ตรวจสอบว่าเคยส่งแจ้งเตือนไปแล้วหรือยัง
+                if not device_notification_sent.get(device_id, False):
+                    try:
+                        pond_id = int(device_id.split("_")[-1])  # คาดรูปแบบ raspi_pond_{N}
+                        print(f"🚨 Device {device_id} is offline ({misses}/{OFFLINE_MISSES_REQUIRED})! Sending notification...")
+                        send_device_offline_notification(device_id, pond_id)
+                        # ตั้งค่าว่าได้ส่งแจ้งเตือนไปแล้ว
+                        device_notification_sent[device_id] = True
+                    except (ValueError, IndexError):
+                        print(f"⚠️ Cannot parse pond_id from device_id: {device_id}")
+                else:
+                    print(f"ℹ️ Device {device_id} is offline but notification already sent")
         else:
-            # ได้ heartbeat ทันเวลา รีเซ็ตตัวนับ miss
+            # ได้ heartbeat ทันเวลา รีเซ็ตตัวนับ miss และสถานะการแจ้งเตือน
             if device_id in device_offline_misses:
                 device_offline_misses[device_id] = 0
+            if device_id in device_notification_sent:
+                device_notification_sent[device_id] = False
+                print(f"✅ Device {device_id} is back online - reset notification status")
 
 
 async def loop_build_and_push(pond_id: int):
@@ -1039,18 +1040,72 @@ async def loop_build_and_push(pond_id: int):
             size_json = build_shrimp_size_json(pond_id)
 
             # 📤 ส่งเฉพาะตอนข้อมูลเปลี่ยนจริง (ไม่ดู timestamp)
-            if APP_STATUS_URL:
+            status_clean = _strip_timestamp(status_json)
+            if APP_STATUS_URL and status_clean != last_sent_status:
                 print("📤 Sending pond_status_json:", status_json)
                 _send_json_to(APP_STATUS_URL, status_json)
+                last_sent_status = status_clean
 
-            if APP_SIZE_URL:
+            size_clean = _strip_timestamp(size_json)
+            if APP_SIZE_URL and size_clean != last_sent_size:
                 print("📤 Sending shrimp_size_json:", size_json)
                 _send_json_to(APP_SIZE_URL, size_json)
-            
+                last_sent_size = size_clean
+
         except Exception as e:
             print("🚨 Loop error:", e)
 
-        # หน่วงคาบวนรอบ (ลดโหลด CPU/IO)
+        # หน่วงคาบวนรอบ (ลดโหลด CPU/IO) - ลดเวลาเพื่อตรวจ heartbeat บ่อยขึ้น
+        await asyncio.sleep(2)
+
+
+async def loop_sensor_updates(pond_id: int):
+    """วนลูปส่งข้อมูล sensor ทุก 5 วินาที แยกจาก /process"""
+    global latest_sensor_data, last_sent_status, last_seen_data
+    
+    while True:
+        try:
+            # ตรวจสอบว่ามีข้อมูล sensor ล่าสุดหรือไม่
+            if latest_sensor_data:
+                # ใช้ข้อมูล sensor ล่าสุดจาก /data endpoint
+                sensor_data = latest_sensor_data
+                
+                # ดึงข้อมูลรูปภาพล่าสุดจาก last_seen_data
+                water_image = None
+                water_color = "unknown"
+                if last_seen_data.get("water"):
+                    water_image = _pick_url_maybe_list(last_seen_data["water"].get("output_image"))
+                    water_color = (last_seen_data["water"].get("text_content") or "").strip() or "unknown"
+                
+                shrimp_float_image = None
+                if last_seen_data.get("shrimp"):
+                    shrimp_float_image = _pick_url_maybe_list(last_seen_data["shrimp"].get("output_image"))
+                
+                # สร้าง status json โดยใช้ข้อมูล sensor ล่าสุด + รูปภาพล่าสุด
+                status_json = {
+                    "pondId": str(pond_id),
+                    "timestamp": format_timestamp(),
+                    "DO": float(sensor_data.get("do", 0)),
+                    "PH": float(sensor_data.get("ph", 7)),
+                    "Temp": float(sensor_data.get("temperature", 28)),
+                    "ColorWater": water_color,
+                    "Mineral_1": "0.0",
+                    "Mineral_2": "0.0", 
+                    "Mineral_3": "0.0",
+                    "Mineral_4": "0.0",
+                    "PicColorWater": water_image,
+                    "PicKungOnWater": shrimp_float_image,
+                }
+                
+                # ส่งข้อมูล sensor ทุก 5 วินาที
+                if APP_STATUS_URL:
+                    print("📤 Sending sensor update:", status_json)
+                    _send_json_to(APP_STATUS_URL, status_json)
+                    
+        except Exception as e:
+            print("🚨 Sensor loop error:", e)
+            
+        # หน่วง 5 วินาที
         await asyncio.sleep(5)
 
 
@@ -1062,6 +1117,7 @@ async def startup_event():
     # สามารถแก้ pond_id ให้ dynamic ได้ตามระบบ login/หลายบ่อ
     pond_id = 1
     asyncio.create_task(loop_build_and_push(pond_id))
+    asyncio.create_task(loop_sensor_updates(pond_id))
 
 # ==========================
 # ENTRYPOINT
@@ -1070,8 +1126,6 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=port)
-
-
 
 
 
