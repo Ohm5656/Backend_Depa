@@ -707,20 +707,15 @@ def build_pond_status_json(pond_id: int) -> dict:
         }
 
     # ส่วนแร่ธาตุ/สาร
-    minerals = {"Mineral_1": 0.0, "Mineral_2": 0.0, "Mineral_3": "0.0", "Mineral_4": "0.0"}
+    minerals = {"Mineral_1": 0.0, "Mineral_2": 0.0, "Mineral_3": 0.0, "Mineral_4": 0.0}
     if san_d:
         arr = san_d.get("remaining_g") or []
-        for i in range(4):
-            if i < len(arr):
-                if i < 2:
-                    # กล่อง 1-2: ตัวเลข (น้ำหนัก)
-                    minerals[f"Mineral_{i+1}"] = float(arr[i]) if isinstance(arr[i], (int, float)) else 0.0
-                else:
-                    # กล่อง 3-4: สถานะเป็นสตริง
-                    if isinstance(arr[i], float):
-                        minerals[f"Mineral_{i+1}"] = arr[i]
-                    else:
-                        minerals[f"Mineral_{i+1}"] = "0.0" if arr[i] else "0.0"
+        for i in range(min(4, len(arr))):
+            val = arr[i]
+            try:
+                minerals[f"Mineral_{i+1}"] = float(val)
+            except (ValueError, TypeError):
+                minerals[f"Mineral_{i+1}"] = 0.0   # ถ้าไม่ใช่ตัวเลข ให้รีเซ็ตเป็น 0.0
 
     # รูปสีน้ำ + สี
     water_image = None
@@ -737,14 +732,14 @@ def build_pond_status_json(pond_id: int) -> dict:
     data = {
         "pondId": str(pond_id) if pond_id is not None else None,
         "timestamp": format_timestamp(),
-        "DO": sensor_part["do"],
-        "PH": sensor_part["ph"],
-        "Temp": sensor_part["temperature"],
+        "DO": float(sensor_part["do"]) if sensor_part["do"] is not None else None,
+        "PH": float(sensor_part["ph"]) if sensor_part["ph"] is not None else None,
+        "Temp": float(sensor_part["temperature"]) if sensor_part["temperature"] is not None else None,
         "ColorWater": water_color,
-        "Mineral_1": "0.0",
-        "Mineral_2": "0.0",
-        "Mineral_3": "0.0",
-        "Mineral_4": "0.0",
+        "Mineral_1": minerals["Mineral_1"],
+        "Mineral_2": minerals["Mineral_2"],
+        "Mineral_3": minerals["Mineral_3"],
+        "Mineral_4": minerals["Mineral_4"],
         "PicColorWater": water_image,
         "PicKungOnWater": shrimp_float_image,
     }
@@ -753,6 +748,7 @@ def build_pond_status_json(pond_id: int) -> dict:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
     return data
+
 
 
 def build_shrimp_size_json(pond_id: int) -> dict:
@@ -1116,6 +1112,7 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=port)
+
 
 
 
