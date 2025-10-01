@@ -656,8 +656,6 @@ HEARTBEAT_TIMEOUT = int(os.environ.get("HEARTBEAT_TIMEOUT", "60"))  # วิน�
 OFFLINE_MISSES_REQUIRED = int(os.environ.get("OFFLINE_MISSES_REQUIRED", "3"))
 # เก็บจำนวนครั้งที่พลาด heartbeat ต่อเนื่องของแต่ละ device
 device_offline_misses = {}
-# เก็บสถานะการแจ้งเตือน offline ของแต่ละ device (เพื่อไม่ส่งซ้ำ)
-device_notification_sent = {}
 
 
 # ==========================
@@ -970,8 +968,8 @@ def _strip_timestamp(d: dict) -> dict:
 
 
 async def check_device_heartbeats():
-    """ตรวจสอบ device heartbeat และส่งการแจ้งเตือนถ้า offline พร้อม debounce"""
-    global device_heartbeats, device_offline_misses, device_notification_sent
+    """ตรวจสอบ device heartbeat และส่งการแจ้งเตือนถ้า offline (ส่งซ้ำทุกครั้ง)"""
+    global device_heartbeats, device_offline_misses
     current_time = time.time()
 
     for device_id, last_heartbeat_time in list(device_heartbeats.items()):
@@ -980,25 +978,18 @@ async def check_device_heartbeats():
             device_offline_misses[device_id] = device_offline_misses.get(device_id, 0) + 1
             misses = device_offline_misses[device_id]
             if misses >= OFFLINE_MISSES_REQUIRED:
-                # ตรวจสอบว่าเคยส่งแจ้งเตือนไปแล้วหรือยัง
-                if not device_notification_sent.get(device_id, False):
-                    try:
-                        pond_id = int(device_id.split("_")[-1])  # คาดรูปแบบ raspi_pond_{N}
-                        print(f"🚨 Device {device_id} is offline ({misses}/{OFFLINE_MISSES_REQUIRED})! Sending notification...")
-                        send_device_offline_notification(device_id, pond_id)
-                        # ตั้งค่าว่าได้ส่งแจ้งเตือนไปแล้ว
-                        device_notification_sent[device_id] = True
-                    except (ValueError, IndexError):
-                        print(f"⚠️ Cannot parse pond_id from device_id: {device_id}")
-                else:
-                    print(f"ℹ️ Device {device_id} is offline but notification already sent")
+                # ส่งการแจ้งเตือนทุกครั้งที่ตรวจพบ offline
+                try:
+                    pond_id = int(device_id.split("_")[-1])  # คาดรูปแบบ raspi_pond_{N}
+                    print(f"🚨 Device {device_id} is offline ({misses}/{OFFLINE_MISSES_REQUIRED})! Sending notification...")
+                    send_device_offline_notification(device_id, pond_id)
+                except (ValueError, IndexError):
+                    print(f"⚠️ Cannot parse pond_id from device_id: {device_id}")
         else:
-            # ได้ heartbeat ทันเวลา รีเซ็ตตัวนับ miss และสถานะการแจ้งเตือน
+            # ได้ heartbeat ทันเวลา รีเซ็ตตัวนับ miss
             if device_id in device_offline_misses:
                 device_offline_misses[device_id] = 0
-            if device_id in device_notification_sent:
-                device_notification_sent[device_id] = False
-                print(f"✅ Device {device_id} is back online - reset notification status")
+                print(f"✅ Device {device_id} is back online")
 
 
 async def loop_build_and_push(pond_id: int):
@@ -1063,13 +1054,14 @@ async def loop_sensor_updates(pond_id: int):
     """วนลูปส่งข้อมูล sensor ทุก 5 วินาที แยกจาก /process"""
     global latest_sensor_data, last_sent_status, last_seen_data
     
+    print(f"🔄 Sensor update loop started for pond {pond_id}")
+    
     while True:
         try:
-            # ตรวจสอบว่ามีข้อมูล sensor ล่าสุดหรือไม่
-            if latest_sensor_data:
-                # ใช้ข้อมูล sensor ล่าสุดจาก /data endpoint
-                sensor_data = latest_sensor_data
-                
+            # ใช้ข้อมูล sensor ล่าสุด (ลำดับความสำคัญ: latest_sensor_data > last_seen_data["sensor"])
+            sensor_data = latest_sensor_data or last_seen_data.get("sensor")
+            
+            if sensor_data:
                 # ดึงข้อมูลรูปภาพล่าสุดจาก last_seen_data
                 water_image = None
                 water_color = "unknown"
@@ -1099,11 +1091,15 @@ async def loop_sensor_updates(pond_id: int):
                 
                 # ส่งข้อมูล sensor ทุก 5 วินาที
                 if APP_STATUS_URL:
-                    print("📤 Sending sensor update:", status_json)
+                    print(f"📤 [Sensor Loop] Sending sensor update: DO={status_json['DO']}, PH={status_json['PH']}, Temp={status_json['Temp']}")
                     _send_json_to(APP_STATUS_URL, status_json)
+                else:
+                    print("⚠️ [Sensor Loop] APP_STATUS_URL not configured")
+            else:
+                print("⏳ [Sensor Loop] Waiting for sensor data...")
                     
         except Exception as e:
-            print("🚨 Sensor loop error:", e)
+            print(f"🚨 Sensor loop error: {e}")
             
         # หน่วง 5 วินาที
         await asyncio.sleep(5)
