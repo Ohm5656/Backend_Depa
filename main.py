@@ -19,6 +19,7 @@ from typing import List
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import copy
+import math
 
 # ==========================
 # Imports จาก process modules
@@ -745,8 +746,8 @@ def build_shrimp_size_json(pond_id: int) -> dict:
     data = {
         "pondId": pond_id,
         "timestamp": format_timestamp(),
-        "Size_CM": length_cm,   # ปัดทศนิยม 2 ตำแหน่ง
-        "Size_gram": weight_g,  # ปัดทศนิยม 1 ตำแหน่ง
+        "Size_CM": round(length_cm,2),   # ปัดทศนิยม 2 ตำแหน่ง
+        "Size_gram": round(weight_g,2),  # ปั)ดทศนิยม 1 ตำแหน่ง
         "SizePic": size_image,
         "PicFood": raw_image or size_image,
         "PicKungDin": video_url,
@@ -1038,18 +1039,14 @@ async def loop_build_and_push(pond_id: int):
             size_json = build_shrimp_size_json(pond_id)
 
             # 📤 ส่งเฉพาะตอนข้อมูลเปลี่ยนจริง (ไม่ดู timestamp)
-            status_clean = _strip_timestamp(status_json)
-            if APP_STATUS_URL and status_clean != last_sent_status:
+            if APP_STATUS_URL:
                 print("📤 Sending pond_status_json:", status_json)
                 _send_json_to(APP_STATUS_URL, status_json)
-                last_sent_status = status_clean
 
-            size_clean = _strip_timestamp(size_json)
-            if APP_SIZE_URL and size_clean != last_sent_size:
+            if APP_SIZE_URL:
                 print("📤 Sending shrimp_size_json:", size_json)
                 _send_json_to(APP_SIZE_URL, size_json)
-                last_sent_size = size_clean
-
+            
         except Exception as e:
             print("🚨 Loop error:", e)
 
@@ -1073,6 +1070,7 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=port)
+
 
 
 
