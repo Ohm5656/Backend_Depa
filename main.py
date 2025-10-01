@@ -791,37 +791,51 @@ async def receive_stock_json(request: Request):
 
 @app.post("/data")
 async def receive_sensor_data(request: Request):
-    """รับข้อมูล sensor JSON และเรียก auto_dose หลังบันทึก"""
+    """รับข้อมูล sensor JSON และเรียก auto_dose หลังบันทึก
+       ✅ รองรับกรณีส่งมาไม่ครบ โดยใส่ค่า default ให้
+    """
     try:
         data = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
-    required_keys = ["pond_id", "ph", "temperature", "do", "timestamp"]
-    if not all(k in data for k in required_keys):
-        raise HTTPException(status_code=400, detail="Missing required fields")
+    # ต้องมี pond_id อย่างน้อย
+    if "pond_id" not in data:
+        raise HTTPException(status_code=400, detail="Missing pond_id")
 
+    # ✅ ใส่ค่า default ถ้าไม่ส่งมา
+    pond_id = int(data["pond_id"])
+    ph = float(data.get("ph", 7.0))          # default 7.0
+    temp = float(data.get("temperature", 28))  # default 28 °C
+    do = float(data.get("do", 5.0))          # default 5.0
+    timestamp = data.get("timestamp", format_timestamp())
+
+    # อัปเดต object ที่จะเซฟ
+    clean_data = {
+        "pond_id": pond_id,
+        "ph": ph,
+        "temperature": temp,
+        "do": do,
+        "timestamp": timestamp
+    }
+
+    # เซฟไฟล์ JSON
     filename = f"sensor_{now_bangkok().strftime('%Y%m%dT%H%M%S%f')}.json"
     file_path = os.path.join(SENSOR_DIR, filename)
 
     try:
         with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+            json.dump(clean_data, f, ensure_ascii=False, indent=2)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save sensor data: {e}")
 
     print(f"✅ Saved sensor JSON: {file_path}")
 
     # 🟢 เรียก auto_dose หลังบันทึกข้อมูล
-    pond_id = int(data["pond_id"])
-    ph = float(data["ph"])
-    temp = float(data["temperature"])
-    do = float(data["do"])
     pond_size_rai = 1.0  # 👉 ปรับได้เอง หรืออ่านจากไฟล์ pond_xxx.json
-
     process_auto_dose(pond_id, pond_size_rai, ph, temp, do, last_dose={})
 
-    return {"status": "success", "saved_file": file_path}
+    return {"status": "success", "saved_file": file_path, "data": clean_data}
 
 
 # ==========================
@@ -1059,6 +1073,7 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=port)
+
 
 
 
