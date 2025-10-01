@@ -413,6 +413,8 @@ def get_latest_pond_info_for_pond(data_ponds_dir, pond_id):
 # ==========================
 @app.post("/process")
 async def process_files(files: List[UploadFile] = File(...)):
+    global last_seen_data  # ✅ เพิ่มเพื่ออัพเดท cache ทันที
+    
     os.makedirs("input_raspi1", exist_ok=True)
     os.makedirs("input_raspi2", exist_ok=True)
     os.makedirs("input_video", exist_ok=True)
@@ -450,6 +452,12 @@ async def process_files(files: List[UploadFile] = File(...)):
                         pond_number=pond_number,
                         total_larvae=total_larvae
                     )
+                    
+                    # ✅ อัพเดท cache ทันที
+                    if os.path.exists(json_path):
+                        with open(json_path, "r", encoding="utf-8") as f:
+                            last_seen_data["shrimp"] = json.load(f)
+                    
                     results.append({"type": "shrimp_floating", "filename": filename, "json": json_path})
 
                 # Shrimp Size
@@ -473,6 +481,12 @@ async def process_files(files: List[UploadFile] = File(...)):
                         total_larvae=total_larvae,
                         original_input_path=input_path
                     )
+                    
+                    # ✅ อัพเดท cache ทันที
+                    if os.path.exists(json_path):
+                        with open(json_path, "r", encoding="utf-8") as f:
+                            last_seen_data["size"] = json.load(f)
+                    
                     results.append({"type": "shrimp_size", "filename": filename, "json": json_path})
 
                 # Water
@@ -503,6 +517,12 @@ async def process_files(files: List[UploadFile] = File(...)):
                         pond_number=pond_number,
                         total_larvae=total_larvae
                     )
+                    
+                    # ✅ อัพเดท cache ทันที
+                    if os.path.exists(json_path):
+                        with open(json_path, "r", encoding="utf-8") as f:
+                            last_seen_data["water"] = json.load(f)
+                    
                     results.append({"type": "water_image", "filename": filename, "json": json_path})
 
             # Video
@@ -525,6 +545,12 @@ async def process_files(files: List[UploadFile] = File(...)):
                     pond_number=pond_number,
                     total_larvae=total_larvae
                 )
+                
+                # ✅ อัพเดท cache ทันที
+                if os.path.exists(json_path):
+                    with open(json_path, "r", encoding="utf-8") as f:
+                        last_seen_data["din"] = json.load(f)
+                
                 results.append({"type": "shrimp_video", "filename": filename, "json": json_path})
 
             else:
@@ -656,6 +682,10 @@ HEARTBEAT_TIMEOUT = int(os.environ.get("HEARTBEAT_TIMEOUT", "60"))  # วิน�
 OFFLINE_MISSES_REQUIRED = int(os.environ.get("OFFLINE_MISSES_REQUIRED", "3"))
 # เก็บจำนวนครั้งที่พลาด heartbeat ต่อเนื่องของแต่ละ device
 device_offline_misses = {}
+# เก็บเวลาที่ส่งการแจ้งเตือน offline ครั้งล่าสุดของแต่ละ device (สำหรับส่งซ้ำทุก 2 นาที)
+device_last_notification_time = {}
+# กำหนดระยะเวลาระหว่างการส่งแจ้งเตือนซ้ำ (2 นาที = 120 วินาที)
+NOTIFICATION_REPEAT_INTERVAL = int(os.environ.get("NOTIFICATION_REPEAT_INTERVAL", "120"))  # วินาที
 
 
 # ==========================
@@ -745,8 +775,8 @@ def build_shrimp_size_json(pond_id: int) -> dict:
     data = {
         "pondId": pond_id,
         "timestamp": format_timestamp(),
-        "Size_CM": round(length_cm, 2) if length_cm is not None else None,
-        "Size_gram": round(weight_g, 2) if weight_g is not None else None,
+        "Size_CM": length_cm,   # ปัดทศนิยม 2 ตำแหน่ง
+        "Size_gram": weight_g,  # ปัดทศนิยม 1 ตำแหน่ง
         "SizePic": size_image,
         "PicFood": raw_image or size_image,
         "PicKungDin": video_url,
@@ -791,8 +821,8 @@ async def receive_stock_json(request: Request):
 
 @app.post("/data")
 async def receive_sensor_data(request: Request):
-    """รับข้อมูล sensor JSON และเรียก auto_dose หลังบันทึก"""
-    global latest_sensor_data
+    """รับข้อมูล sensor JSON และส่ง status ทันที (ใช้ข้อมูล /process อันล่าสุด)"""
+    global last_seen_data, last_sent_status
     
     try:
         data = await request.json()
@@ -803,6 +833,7 @@ async def receive_sensor_data(request: Request):
     if not all(k in data for k in required_keys):
         raise HTTPException(status_code=400, detail="Missing required fields")
 
+    pond_id = int(data["pond_id"])
     filename = f"sensor_{now_bangkok().strftime('%Y%m%dT%H%M%S%f')}.json"
     file_path = os.path.join(SENSOR_DIR, filename)
 
@@ -814,11 +845,7 @@ async def receive_sensor_data(request: Request):
 
     print(f"✅ Saved sensor JSON: {file_path}")
 
-    # 🟢 เก็บข้อมูล sensor ล่าสุดสำหรับส่งแยก
-    latest_sensor_data = data
-
     # 🟢 เรียก auto_dose หลังบันทึกข้อมูล
-    pond_id = int(data["pond_id"])
     ph = float(data["ph"])
     temp = float(data["temperature"])
     do = float(data["do"])
@@ -826,7 +853,22 @@ async def receive_sensor_data(request: Request):
 
     process_auto_dose(pond_id, pond_size_rai, ph, temp, do, last_dose={})
 
-    return {"status": "success", "saved_file": file_path}
+    # ✅ อัพเดท cache ด้วยข้อมูล sensor ใหม่
+    last_seen_data["sensor"] = data
+    
+    # ✅ Build และส่ง status ทันที (ใช้ข้อมูล water/shrimp/size/din อันล่าสุดที่มี)
+    status_json = build_pond_status_json(pond_id)
+    status_clean = _strip_timestamp(status_json)
+    
+    # ส่งเฉพาะตอนข้อมูล sensor เปลี่ยนจริง
+    if APP_STATUS_URL and status_clean != last_sent_status:
+        print(f"📤 Sending pond_status immediately after sensor update: {status_json}")
+        _send_json_to(APP_STATUS_URL, status_json)
+        last_sent_status = status_clean
+    else:
+        print(f"ℹ️ Sensor data unchanged or no APP_STATUS_URL, skipping send")
+
+    return {"status": "success", "saved_file": file_path, "status_sent": status_clean != last_sent_status}
 
 
 # ==========================
@@ -955,8 +997,6 @@ def health_check():
 # ==========================
 last_sent_status = None
 last_sent_size = None
-# เก็บข้อมูล sensor ล่าสุดสำหรับส่งแยก
-latest_sensor_data = None
 
 def _strip_timestamp(d: dict) -> dict:
     """คืนค่า dict โดยตัดฟิลด์ timestamp ออก (ใช้เช็คการเปลี่ยนแปลงจริง)"""
@@ -968,8 +1008,8 @@ def _strip_timestamp(d: dict) -> dict:
 
 
 async def check_device_heartbeats():
-    """ตรวจสอบ device heartbeat และส่งการแจ้งเตือนถ้า offline (ส่งซ้ำทุกครั้ง)"""
-    global device_heartbeats, device_offline_misses
+    """ตรวจสอบ device heartbeat และส่งการแจ้งเตือนถ้า offline (ซ้ำทุก 2 นาที)"""
+    global device_heartbeats, device_offline_misses, device_last_notification_time
     current_time = time.time()
 
     for device_id, last_heartbeat_time in list(device_heartbeats.items()):
@@ -977,19 +1017,29 @@ async def check_device_heartbeats():
         if is_timeout:
             device_offline_misses[device_id] = device_offline_misses.get(device_id, 0) + 1
             misses = device_offline_misses[device_id]
+            
+            # ✅ ส่งแจ้งเตือนครั้งแรกเมื่อ offline หรือส่งซ้ำทุก 2 นาที
             if misses >= OFFLINE_MISSES_REQUIRED:
-                # ส่งการแจ้งเตือนทุกครั้งที่ตรวจพบ offline
-                try:
-                    pond_id = int(device_id.split("_")[-1])  # คาดรูปแบบ raspi_pond_{N}
-                    print(f"🚨 Device {device_id} is offline ({misses}/{OFFLINE_MISSES_REQUIRED})! Sending notification...")
-                    send_device_offline_notification(device_id, pond_id)
-                except (ValueError, IndexError):
-                    print(f"⚠️ Cannot parse pond_id from device_id: {device_id}")
+                last_notif_time = device_last_notification_time.get(device_id, 0)
+                time_since_last_notif = current_time - last_notif_time
+                
+                # ส่งแจ้งเตือนถ้า: ยังไม่เคยส่ง หรือ ผ่านไปแล้ว 2 นาที
+                if last_notif_time == 0 or time_since_last_notif >= NOTIFICATION_REPEAT_INTERVAL:
+                    try:
+                        pond_id = int(device_id.split("_")[-1])  # คาดรูปแบบ raspi_pond_{N}
+                        print(f"🚨 Device {device_id} is offline ({misses}/{OFFLINE_MISSES_REQUIRED})! Sending notification...")
+                        send_device_offline_notification(device_id, pond_id)
+                        # บันทึกเวลาที่ส่งแจ้งเตือน (ไม่รีเซ็ต misses เพื่อให้ส่งซ้ำได้)
+                        device_last_notification_time[device_id] = current_time
+                    except (ValueError, IndexError):
+                        print(f"⚠️ Cannot parse pond_id from device_id: {device_id}")
         else:
-            # ได้ heartbeat ทันเวลา รีเซ็ตตัวนับ miss
+            # ✅ เมื่อกลับมาออนไลน์ รีเซ็ตทุกอย่าง
             if device_id in device_offline_misses:
                 device_offline_misses[device_id] = 0
-                print(f"✅ Device {device_id} is back online")
+            if device_id in device_last_notification_time:
+                print(f"✅ Device {device_id} is back online! Resetting notification timer.")
+                device_last_notification_time[device_id] = 0
 
 
 async def loop_build_and_push(pond_id: int):
@@ -1046,62 +1096,7 @@ async def loop_build_and_push(pond_id: int):
         except Exception as e:
             print("🚨 Loop error:", e)
 
-        # หน่วงคาบวนรอบ (ลดโหลด CPU/IO) - ลดเวลาเพื่อตรวจ heartbeat บ่อยขึ้น
-        await asyncio.sleep(2)
-
-
-async def loop_sensor_updates(pond_id: int):
-    """วนลูปส่งข้อมูล sensor ทุก 5 วินาที แยกจาก /process"""
-    global latest_sensor_data, last_sent_status, last_seen_data
-    
-    print(f"🔄 Sensor update loop started for pond {pond_id}")
-    
-    while True:
-        try:
-            # ใช้ข้อมูล sensor ล่าสุด (ลำดับความสำคัญ: latest_sensor_data > last_seen_data["sensor"])
-            sensor_data = latest_sensor_data or last_seen_data.get("sensor")
-            
-            if sensor_data:
-                # ดึงข้อมูลรูปภาพล่าสุดจาก last_seen_data
-                water_image = None
-                water_color = "unknown"
-                if last_seen_data.get("water"):
-                    water_image = _pick_url_maybe_list(last_seen_data["water"].get("output_image"))
-                    water_color = (last_seen_data["water"].get("text_content") or "").strip() or "unknown"
-                
-                shrimp_float_image = None
-                if last_seen_data.get("shrimp"):
-                    shrimp_float_image = _pick_url_maybe_list(last_seen_data["shrimp"].get("output_image"))
-                
-                # สร้าง status json โดยใช้ข้อมูล sensor ล่าสุด + รูปภาพล่าสุด
-                status_json = {
-                    "pondId": str(pond_id),
-                    "timestamp": format_timestamp(),
-                    "DO": float(sensor_data.get("do", 0)),
-                    "PH": float(sensor_data.get("ph", 7)),
-                    "Temp": float(sensor_data.get("temperature", 28)),
-                    "ColorWater": water_color,
-                    "Mineral_1": "0.0",
-                    "Mineral_2": "0.0", 
-                    "Mineral_3": "0.0",
-                    "Mineral_4": "0.0",
-                    "PicColorWater": water_image,
-                    "PicKungOnWater": shrimp_float_image,
-                }
-                
-                # ส่งข้อมูล sensor ทุก 5 วินาที
-                if APP_STATUS_URL:
-                    print(f"📤 [Sensor Loop] Sending sensor update: DO={status_json['DO']}, PH={status_json['PH']}, Temp={status_json['Temp']}")
-                    _send_json_to(APP_STATUS_URL, status_json)
-                else:
-                    print("⚠️ [Sensor Loop] APP_STATUS_URL not configured")
-            else:
-                print("⏳ [Sensor Loop] Waiting for sensor data...")
-                    
-        except Exception as e:
-            print(f"🚨 Sensor loop error: {e}")
-            
-        # หน่วง 5 วินาที
+        # หน่วงคาบวนรอบ (ลดโหลด CPU/IO)
         await asyncio.sleep(5)
 
 
@@ -1113,7 +1108,6 @@ async def startup_event():
     # สามารถแก้ pond_id ให้ dynamic ได้ตามระบบ login/หลายบ่อ
     pond_id = 1
     asyncio.create_task(loop_build_and_push(pond_id))
-    asyncio.create_task(loop_sensor_updates(pond_id))
 
 # ==========================
 # ENTRYPOINT
