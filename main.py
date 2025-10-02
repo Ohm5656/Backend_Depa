@@ -209,32 +209,36 @@ def save_json_result(
         "text_content": text_content
     }
 
+    # ถ้าไม่เจอ pond_id ใน args ลองเดาจากชื่อไฟล์
     if result_data["pond_number"] is None and original_name:
         fallback_pond = extract_pond_id_from_filename(original_name.lower())
         if fallback_pond is not None:
             result_data["pond_number"] = fallback_pond
 
+    # output image
     if output_image:
         if isinstance(output_image, list):
             result_data["output_image"] = [make_public_url(p) for p in output_image]
         else:
             result_data["output_image"] = make_public_url(output_image)
 
+    # output video
     if output_video:
         result_data["output_video"] = make_public_url(output_video)
 
+    # ✅ raw image: ตั้งชื่อใหม่ทุกครั้ง (timestamp + ชื่อไฟล์เก่า)
     if original_input_path and os.path.exists(original_input_path):
         raw_dir = os.path.join(LOCAL_STORAGE_BASE, result_type, "raw")
         os.makedirs(raw_dir, exist_ok=True)
-        raw_filename = os.path.basename(original_input_path)
+
+        raw_filename = f"{now_bangkok().strftime('%Y%m%d_%H%M%S_%f')}_{os.path.basename(original_input_path)}"
         raw_dest = os.path.join(raw_dir, raw_filename)
+
         try:
-            if not (os.path.exists(raw_dest) and os.path.samefile(original_input_path, raw_dest)):
-                shutil.copy2(original_input_path, raw_dest)
-        except FileNotFoundError:
             shutil.copy2(original_input_path, raw_dest)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"❌ Error copying raw file: {e}")
+
         if os.path.exists(raw_dest):
             result_data["raw_input_image"] = build_public_url(raw_dest)
 
@@ -255,6 +259,7 @@ def save_json_result(
             raw_image_url = result_data.get("raw_input_image")
             send_shrimp_alert_notification(pond_id, raw_image_url, image_url)
 
+    # บันทึก JSON ลงโฟลเดอร์
     save_dir = os.path.join(LOCAL_STORAGE_BASE, result_type)
     os.makedirs(save_dir, exist_ok=True)
 
@@ -265,6 +270,7 @@ def save_json_result(
         json.dump(result_data, f, ensure_ascii=False, indent=2)
 
     return json_path
+
 
 # ==========================
 # Extract pond_id จาก filename
@@ -1128,6 +1134,7 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=port)
+
 
 
 
