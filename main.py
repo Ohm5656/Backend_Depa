@@ -413,7 +413,7 @@ def get_latest_pond_info_for_pond(data_ponds_dir, pond_id):
 # ==========================
 @app.post("/process")
 async def process_files(files: List[UploadFile] = File(...)):
-    global last_seen_data  # ✅ เพิ่มเพื่ออัพเดท cache ทันที
+    global last_seen_data  # ✅ อัพเดท cache ทันที
     
     os.makedirs("input_raspi1", exist_ok=True)
     os.makedirs("input_raspi2", exist_ok=True)
@@ -453,11 +453,15 @@ async def process_files(files: List[UploadFile] = File(...)):
                         total_larvae=total_larvae
                     )
                     
-                    # ✅ อัพเดท cache ทันที
+                    # ✅ อัพเดท cache
                     if os.path.exists(json_path):
                         with open(json_path, "r", encoding="utf-8") as f:
                             last_seen_data["shrimp"] = json.load(f)
-                    
+
+                    # ✅ ส่ง push ทันที
+                    status_json = build_pond_status_json(pond_id)
+                    _send_json_to(APP_STATUS_URL, status_json)
+
                     results.append({"type": "shrimp_floating", "filename": filename, "json": json_path})
 
                 # Shrimp Size
@@ -482,11 +486,14 @@ async def process_files(files: List[UploadFile] = File(...)):
                         original_input_path=input_path
                     )
                     
-                    # ✅ อัพเดท cache ทันที
                     if os.path.exists(json_path):
                         with open(json_path, "r", encoding="utf-8") as f:
                             last_seen_data["size"] = json.load(f)
-                    
+
+                    # ✅ ส่ง push ทันที (shrimp_size)
+                    size_json = build_shrimp_size_json(pond_id)
+                    _send_json_to(APP_SIZE_URL, size_json)
+
                     results.append({"type": "shrimp_size", "filename": filename, "json": json_path})
 
                 # Water
@@ -497,7 +504,7 @@ async def process_files(files: List[UploadFile] = File(...)):
 
                     output_img_path, output_txt_path = await asyncio.to_thread(analyze_water, input_path)
 
-                    # 🟢 อ่านค่า sensor ล่าสุดมาใช้ร่วมกับ auto_dose
+                    # 🟢 อ่านค่า sensor ล่าสุด
                     sensor_path, sensor_d = _latest_json_in_dir(FS_SENSOR_DIR, pond_id=pond_id)
                     if sensor_d:
                         ph = float(sensor_d.get("ph", 7))
@@ -518,11 +525,14 @@ async def process_files(files: List[UploadFile] = File(...)):
                         total_larvae=total_larvae
                     )
                     
-                    # ✅ อัพเดท cache ทันที
                     if os.path.exists(json_path):
                         with open(json_path, "r", encoding="utf-8") as f:
                             last_seen_data["water"] = json.load(f)
-                    
+
+                    # ✅ ส่ง push ทันที
+                    status_json = build_pond_status_json(pond_id)
+                    _send_json_to(APP_STATUS_URL, status_json)
+
                     results.append({"type": "water_image", "filename": filename, "json": json_path})
 
             # Video
@@ -546,11 +556,14 @@ async def process_files(files: List[UploadFile] = File(...)):
                     total_larvae=total_larvae
                 )
                 
-                # ✅ อัพเดท cache ทันที
                 if os.path.exists(json_path):
                     with open(json_path, "r", encoding="utf-8") as f:
                         last_seen_data["din"] = json.load(f)
-                
+
+                # ✅ ส่ง push ทันที (shrimp_size.json มี video link)
+                size_json = build_shrimp_size_json(pond_id)
+                _send_json_to(APP_SIZE_URL, size_json)
+
                 results.append({"type": "shrimp_video", "filename": filename, "json": json_path})
 
             else:
@@ -564,6 +577,7 @@ async def process_files(files: List[UploadFile] = File(...)):
         "message": f"✅ ประมวลผลไฟล์สำเร็จ {len(results)} รายการ",
         "results": results
     }
+
 # ==========================
 # CONFIG เพิ่มเติมสำหรับไฟล์/ไดเรกทอรี และปลายทางส่ง JSON
 # ==========================
@@ -1112,6 +1126,7 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=port)
+
 
 
 
