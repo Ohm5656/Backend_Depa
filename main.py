@@ -868,15 +868,13 @@ async def receive_sensor_data(request: Request):
     
     # ✅ Build และส่ง status ทันที (ใช้ข้อมูล water/shrimp/size/din อันล่าสุดที่มี)
     status_json = build_pond_status_json(pond_id)
-    status_clean = _strip_timestamp(status_json)
-    
-    # ส่งเฉพาะตอนข้อมูล sensor เปลี่ยนจริง
-    if APP_STATUS_URL and status_clean != last_sent_status:
+
+    if APP_STATUS_URL:
         print(f"📤 Sending pond_status immediately after sensor update: {status_json}")
         _send_json_to(APP_STATUS_URL, status_json)
-        last_sent_status = status_clean
     else:
-        print(f"ℹ️ Sensor data unchanged or no APP_STATUS_URL, skipping send")
+        print(f"ℹ️ No APP_STATUS_URL set, skipping send")
+
 
     return {"status": "success", "saved_file": file_path, "status_sent": status_clean != last_sent_status}
 
