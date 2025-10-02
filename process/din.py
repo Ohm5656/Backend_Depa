@@ -1,22 +1,25 @@
 import os
+import torch
 from ultralytics import YOLO
 from deep_sort_realtime.deepsort_tracker import DeepSort
 import numpy as np
 import imageio.v2 as imageio
 import cv2
-import torch
-from torchvision.ops import nms  # ✅ เพิ่ม NMS
+from torchvision.ops import nms
 
 # โหลดโมเดลกุ้งดิ้นจากโฟลเดอร์ Model/
 model_path = os.environ.get("MODEL_DIN", os.path.join("Model", "din.pt"))
 model = YOLO(model_path)
 
 tracker = DeepSort(max_age=30, n_init=3, max_cosine_distance=0.3)
-NO_MOVE_THRESHOLD = 2000
-LIGHT_MOVE_THRESHOLD = 2500
+
+# --------------------------
+# PARAMS
+# --------------------------
+NO_MOVE_THRESHOLD = 2.5   # ใช้แบบเวอร์ชันที่สอง
 shrimp_moved_once = set()
 movement_status = {}
-CONFIDENCE_THRESHOLD = 0.7
+CONFIDENCE_THRESHOLD = 0.9
 
 
 def analyze_video(input_path, original_name: str = None):
@@ -24,6 +27,9 @@ def analyze_video(input_path, original_name: str = None):
         print(f"❌ ไม่พบวิดีโอ: {input_path}")
         return
 
+    # ===============================
+    # ใช้ path ของ Railway (/data)
+    # ===============================
     output_dir = os.environ.get("OUTPUT_DIN", "/data/local_storage/din")
     os.makedirs(output_dir, exist_ok=True)
 
@@ -31,10 +37,9 @@ def analyze_video(input_path, original_name: str = None):
     output_video_path = os.path.join(output_dir, f"{base_name}.mp4")
     output_txt_path = os.path.join(output_dir, f"{base_name}.txt")
 
-    # ===============================
-    # พยายามเปิดวิดีโอด้วย imageio
-    # ===============================
-    reader, fps, size = None, None, None
+    # ------------------------------
+    # เปิด video
+    # ------------------------------
     try:
         reader = imageio.get_reader(input_path)
         meta = reader.get_meta_data()
@@ -42,24 +47,19 @@ def analyze_video(input_path, original_name: str = None):
         size = meta.get("size", None)
     except Exception as e:
         print(f"⚠️ imageio เปิดไม่ได้: {e}")
+        reader, fps, size = None, None, None
 
-    # ===============================
-    # ถ้า imageio ใช้ไม่ได้ → ใช้ OpenCV
-    # ===============================
     if size is None:
         cap = cv2.VideoCapture(input_path)
         if not cap.isOpened():
             print("❌ ทั้ง imageio และ OpenCV ไม่สามารถเปิดวิดีโอได้")
             return
 
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        if fps is None or fps <= 0:
-            fps = 25
+        fps = cap.get(cv2.CAP_PROP_FPS) or 25
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         size = (width, height)
 
-        # ทำ generator เอา frame จาก OpenCV
         def frame_generator_cv2(path):
             cap = cv2.VideoCapture(path)
             while cap.isOpened():
@@ -75,11 +75,9 @@ def analyze_video(input_path, original_name: str = None):
     writer = imageio.get_writer(output_video_path, fps=fps)
     prev_positions = {}
 
-    print(f"🎥 Processing video: {input_path}, FPS={fps}, Size={size}")
-
-    # ===============================
+    # ------------------------------
     # วน loop frame
-    # ===============================
+    # ------------------------------
     for frame in reader:
         frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
@@ -87,18 +85,15 @@ def analyze_video(input_path, original_name: str = None):
         boxes = results[0].boxes.xyxy.cpu().numpy()
         scores = results[0].boxes.conf.cpu().numpy()
 
-        # -------------------------------
-        # 🔹 ใช้ NMS กรองกล่องที่ทับกัน
-        # -------------------------------
+        # 🔹 NMS
         if len(boxes) > 0:
             boxes_tensor = torch.tensor(boxes, dtype=torch.float32)
             scores_tensor = torch.tensor(scores, dtype=torch.float32)
             keep = nms(boxes_tensor, scores_tensor, iou_threshold=0.5)
-            keep_idx = keep.numpy()
-            boxes = boxes[keep_idx]
-            scores = scores[keep_idx]
+            boxes = boxes[keep.numpy()]
+            scores = scores[keep.numpy()]
 
-        # สร้าง detection list ให้ DeepSort
+        # DeepSort input
         detections = [([x1, y1, x2 - x1, y2 - y1], score, None)
                       for (x1, y1, x2, y2), score in zip(boxes, scores)
                       if score >= CONFIDENCE_THRESHOLD]
@@ -115,20 +110,22 @@ def analyze_video(input_path, original_name: str = None):
             if track_id in prev_positions:
                 dx, dy = cx - prev_positions[track_id][0], cy - prev_positions[track_id][1]
                 dist = np.sqrt(dx ** 2 + dy ** 2)
-                if dist < NO_MOVE_THRESHOLD:
-                    if track_id not in shrimp_moved_once:
-                        movement_status[track_id] = "sick"
-                    color = (0, 0, 255)
-                elif dist < LIGHT_MOVE_THRESHOLD:
-                    movement_status[track_id] = "medium"
-                    shrimp_moved_once.add(track_id)
-                    color = (0, 255, 255)
-                else:
+
+                # 🔹 Logic เวอร์ชันสอง
+                if track_id in shrimp_moved_once:
                     movement_status[track_id] = "good"
-                    shrimp_moved_once.add(track_id)
                     color = (0, 255, 0)
+                else:
+                    if dist > NO_MOVE_THRESHOLD:
+                        shrimp_moved_once.add(track_id)
+                        movement_status[track_id] = "good"
+                        color = (0, 255, 0)
+                    else:
+                        movement_status[track_id] = "sick"
+                        color = (0, 0, 255)
             else:
-                color = (255, 255, 0)
+                movement_status[track_id] = "sick"
+                color = (0, 0, 255)
 
             prev_positions[track_id] = (cx, cy)
             label = f"id_{track_id} ({movement_status.get(track_id, 'None')})"
@@ -138,7 +135,6 @@ def analyze_video(input_path, original_name: str = None):
 
         writer.append_data(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
 
-    # ปิด writer/reader
     if hasattr(reader, "close"):
         try:
             reader.close()
@@ -146,15 +142,13 @@ def analyze_video(input_path, original_name: str = None):
             pass
     writer.close()
 
-    # ===============================
-    # สรุปผล
-    # ===============================
+    # ------------------------------
+    # Summary
+    # ------------------------------
     total = len(prev_positions)
     moved = len(shrimp_moved_once)
     moved_percent = (moved / total) * 100 if total > 0 else 0
-    overall_status = "✅ สุขภาพดี" if moved_percent >= 70 else \
-                     "⚠️ อ่อนแรง" if moved_percent >= 50 else \
-                     "❌ มีตัวนิ่งเยอะ"
+    overall_status = "✅ สุขภาพดี" if moved_percent >= 70 else "❌ มีตัวไม่ขยับเยอะ"
 
     with open(output_txt_path, "w", encoding="utf-8") as f:
         f.write(f"🦐 จำนวนกุ้งทั้งหมด: {total} ตัว\n")
