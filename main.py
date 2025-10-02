@@ -1089,11 +1089,10 @@ async def loop_build_and_push(pond_id: int):
             size_json = build_shrimp_size_json(pond_id)
 
             # 📤 ส่งเฉพาะตอนข้อมูลเปลี่ยนจริง (ไม่ดู timestamp)
-            status_clean = _strip_timestamp(status_json)
-            if APP_STATUS_URL and status_clean != last_sent_status:
+            if APP_STATUS_URL:
                 print("📤 Sending pond_status_json:", status_json)
                 _send_json_to(APP_STATUS_URL, status_json)
-                last_sent_status = status_clean
+
 
             size_clean = _strip_timestamp(size_json)
             if APP_SIZE_URL and size_clean != last_sent_size:
@@ -1124,6 +1123,7 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=port)
+
 
 
 
