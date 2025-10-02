@@ -829,10 +829,13 @@ async def receive_stock_json(request: Request):
     return {"status": "success", "saved_file": file_path}
 
 
+# ==========================
+# ENDPOINTS: รับ stock / sensor
+# ==========================
 @app.post("/data")
 async def receive_sensor_data(request: Request):
     """รับข้อมูล sensor JSON และส่ง status ทันที (ใช้ข้อมูล /process อันล่าสุด)"""
-    global last_seen_data, last_sent_status
+    global last_seen_data
     
     try:
         data = await request.json()
@@ -866,7 +869,7 @@ async def receive_sensor_data(request: Request):
     # ✅ อัพเดท cache ด้วยข้อมูล sensor ใหม่
     last_seen_data["sensor"] = data
     
-    # ✅ Build และส่ง status ทันที (ใช้ข้อมูล water/shrimp/size/din อันล่าสุดที่มี)
+    # ✅ Build และส่ง status ทันที
     status_json = build_pond_status_json(pond_id)
 
     if APP_STATUS_URL:
@@ -875,8 +878,8 @@ async def receive_sensor_data(request: Request):
     else:
         print(f"ℹ️ No APP_STATUS_URL set, skipping send")
 
-
-    return {"status": "success", "saved_file": file_path, "status_sent": status_clean != last_sent_status}
+    # ✅ return แบบไม่เช็ค status_clean แล้ว
+    return {"status": "success", "saved_file": file_path, "status_sent": True}
 
 
 # ==========================
@@ -1050,9 +1053,12 @@ async def check_device_heartbeats():
                 device_last_notification_time[device_id] = 0
 
 
+# ==========================
+# BACKGROUND LOOP
+# ==========================
 async def loop_build_and_push(pond_id: int):
-    """วนลูปโหลดข้อมูลล่าสุด -> build json -> push ไปยังแอปเมื่อมีการเปลี่ยนแปลง"""
-    global last_seen_data, last_sent_status, last_sent_size
+    """วนลูปโหลดข้อมูลล่าสุด -> build json -> push ไปยังแอปทุกครั้ง"""
+    global last_seen_data
 
     while True:
         try:
@@ -1086,27 +1092,24 @@ async def loop_build_and_push(pond_id: int):
 
             # 📝 build json ทุกครั้ง
             status_json = build_pond_status_json(pond_id)
-            status_clean = _strip_timestamp(status_json)
-            
-            if APP_STATUS_URL and status_clean != last_sent_status:
-                print(f"📤 Sending pond_status immediately after sensor update: {status_json}")
+            size_json = build_shrimp_size_json(pond_id)   # ✅ เพิ่มบรรทัดนี้
+
+            # 📤 ส่ง pond_status ทุกครั้ง
+            if APP_STATUS_URL:
+                print("📤 Sending pond_status_json:", status_json)
                 _send_json_to(APP_STATUS_URL, status_json)
-                last_sent_status = status_clean
-            else:
-                print(f"ℹ️ Sensor data unchanged or no APP_STATUS_URL, skipping send")
 
-
-            size_clean = _strip_timestamp(size_json)
-            if APP_SIZE_URL and size_clean != last_sent_size:
+            # 📤 ส่ง shrimp_size ทุกครั้ง
+            if APP_SIZE_URL:
                 print("📤 Sending shrimp_size_json:", size_json)
                 _send_json_to(APP_SIZE_URL, size_json)
-                last_sent_size = size_clean
 
         except Exception as e:
             print("🚨 Loop error:", e)
 
         # หน่วงคาบวนรอบ (ลดโหลด CPU/IO)
         await asyncio.sleep(5)
+
 
 
 # ==========================
@@ -1125,6 +1128,7 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=port)
+
 
 
 
