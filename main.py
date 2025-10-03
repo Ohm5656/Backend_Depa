@@ -462,11 +462,22 @@ async def process_files(files: List[UploadFile] = File(...)):
                     # ✅ อัพเดท cache
                     if os.path.exists(json_path):
                         with open(json_path, "r", encoding="utf-8") as f:
-                            last_seen_data["shrimp"] = json.load(f)
+                            shrimp_data = json.load(f)
+                            last_seen_data["shrimp"] = shrimp_data
+                            
+                            # ✅ อัพเดท process_cache สำหรับข้อมูลกุ้งลอย
+                            process_cache["shrimp_float_image"] = _pick_url_maybe_list(shrimp_data.get("output_image"))
+                            process_cache["last_shrimp_update"] = format_timestamp()
+                            print(f"🔄 Updated shrimp cache: image={process_cache['shrimp_float_image']}")
 
                     # ✅ ส่ง push ทันที
                     status_json = build_pond_status_json(pond_id)
-                    _send_json_to(APP_STATUS_URL, status_json)
+                    if APP_STATUS_URL:
+                        if _strip_timestamp(status_json) != _strip_timestamp(last_sent_status):
+                            _send_json_to(APP_STATUS_URL, status_json)
+                            last_sent_status = status_json
+                        else:
+                            print("ℹ️ No change in pond_status (process shrimp_float) -> skip send")
 
                     results.append({"type": "shrimp_floating", "filename": filename, "json": json_path})
 
@@ -498,7 +509,12 @@ async def process_files(files: List[UploadFile] = File(...)):
 
                     # ✅ ส่ง push ทันที (shrimp_size)
                     size_json = build_shrimp_size_json(pond_id)
-                    _send_json_to(APP_SIZE_URL, size_json)
+                    if APP_SIZE_URL:
+                        if _strip_timestamp(size_json) != _strip_timestamp(last_sent_size):
+                            _send_json_to(APP_SIZE_URL, size_json)
+                            last_sent_size = size_json
+                        else:
+                            print("ℹ️ No change in shrimp_size (process shrimp_size) -> skip send")
 
                     results.append({"type": "shrimp_size", "filename": filename, "json": json_path})
 
@@ -533,11 +549,23 @@ async def process_files(files: List[UploadFile] = File(...)):
                     
                     if os.path.exists(json_path):
                         with open(json_path, "r", encoding="utf-8") as f:
-                            last_seen_data["water"] = json.load(f)
+                            water_data = json.load(f)
+                            last_seen_data["water"] = water_data
+                            
+                            # ✅ อัพเดท process_cache สำหรับข้อมูลน้ำ
+                            process_cache["water_image"] = _pick_url_maybe_list(water_data.get("output_image"))
+                            process_cache["water_color"] = (water_data.get("text_content") or "").strip() or "unknown"
+                            process_cache["last_water_update"] = format_timestamp()
+                            print(f"🔄 Updated water cache: image={process_cache['water_image']}, color={process_cache['water_color']}")
 
                     # ✅ ส่ง push ทันที
                     status_json = build_pond_status_json(pond_id)
-                    _send_json_to(APP_STATUS_URL, status_json)
+                    if APP_STATUS_URL:
+                        if _strip_timestamp(status_json) != _strip_timestamp(last_sent_status):
+                            _send_json_to(APP_STATUS_URL, status_json)
+                            last_sent_status = status_json
+                        else:
+                            print("ℹ️ No change in pond_status (process water) -> skip send")
 
                     results.append({"type": "water_image", "filename": filename, "json": json_path})
 
@@ -568,7 +596,12 @@ async def process_files(files: List[UploadFile] = File(...)):
 
                 # ✅ ส่ง push ทันที (shrimp_size.json มี video link)
                 size_json = build_shrimp_size_json(pond_id)
-                _send_json_to(APP_SIZE_URL, size_json)
+                if APP_SIZE_URL:
+                    if _strip_timestamp(size_json) != _strip_timestamp(last_sent_size):
+                        _send_json_to(APP_SIZE_URL, size_json)
+                        last_sent_size = size_json
+                    else:
+                        print("ℹ️ No change in shrimp_size (process video) -> skip send")
 
                 results.append({"type": "shrimp_video", "filename": filename, "json": json_path})
 
@@ -594,8 +627,11 @@ BASE_LOCAL = os.environ.get("LOCAL_STORAGE_ROOT", "/data/local_storage")
 APP_STATUS_URL = os.environ.get("APP_STATUS_URL")
 APP_SIZE_URL = os.environ.get("APP_SIZE_URL")
 
-# โฟลเดอร์ย่อยภายใต้ BASE_LOCAL
+## ✅ unify sensor dir ให้ตรงกัน
 FS_SENSOR_DIR = os.path.join(BASE_LOCAL, "sensor")
+SENSOR_DIR = FS_SENSOR_DIR  # ใช้ dir เดียวกันทั้ง /data และ loop
+os.makedirs(SENSOR_DIR, exist_ok=True)
+
 FS_SAN_DIR = os.path.join(BASE_LOCAL, "san")
 FS_WATER_DIR = os.path.join(BASE_LOCAL, "water")
 FS_SHRIMP_DIR = os.path.join(BASE_LOCAL, "shrimp")
@@ -605,10 +641,6 @@ FS_DIN_DIR = os.path.join(BASE_LOCAL, "din")
 # ไฟล์สรุปสถานะล่าสุด
 POND_STATUS_FILE = os.path.join(BASE_LOCAL, "pond_status.json")
 SHRIMP_SIZE_FILE = os.path.join(BASE_LOCAL, "shrimp_size.json")
-
-# โฟลเดอร์รับข้อมูล sensor (สำหรับ endpoint /data)
-SENSOR_DIR = os.environ.get("SENSOR_DIR", "/data/local_storage/sensor")
-os.makedirs(SENSOR_DIR, exist_ok=True)  # สร้างหากยังไม่มี
 
 
 # ==========================
@@ -690,6 +722,17 @@ last_seen_data = {
     "din": None,
 }
 
+# ==========================
+# CACHE สำหรับข้อมูลจาก /process ที่ต้องเก็บไว้ใช้ร่วมกับ sensor
+# ==========================
+process_cache = {
+    "water_image": None,        # รูปสีน้ำล่าสุด
+    "water_color": "unknown",   # สีน้ำล่าสุด
+    "shrimp_float_image": None, # รูปกุ้งลอยล่าสุด
+    "last_water_update": None,  # เวลาที่อัพเดทข้อมูลน้ำล่าสุด
+    "last_shrimp_update": None, # เวลาที่อัพเดทข้อมูลกุ้งลอยล่าสุด
+}
+
 
 # ==========================
 # HEARTBEAT MONITORING
@@ -714,8 +757,6 @@ NOTIFICATION_REPEAT_INTERVAL = int(os.environ.get("NOTIFICATION_REPEAT_INTERVAL"
 def build_pond_status_json(pond_id: int) -> dict:
     sensor_d = last_seen_data["sensor"]
     san_d = last_seen_data["san"]
-    water_d = last_seen_data["water"]
-    shrimp_d = last_seen_data["shrimp"]
 
     # ส่วน sensor
     sensor_part = {"temperature": None, "ph": None, "do": None}
@@ -737,17 +778,13 @@ def build_pond_status_json(pond_id: int) -> dict:
             except (ValueError, TypeError):
                 minerals[f"Mineral_{i+1}"] = 0.0   # ถ้าไม่ใช่ตัวเลข ให้รีเซ็ตเป็น 0.0
 
-    # รูปสีน้ำ + สี
-    water_image = None
-    water_color = "unknown"
-    if water_d:
-        water_image = _pick_url_maybe_list(water_d.get("output_image"))
-        water_color = (water_d.get("text_content") or "").strip() or "unknown"
+    # ✅ ใช้ข้อมูลจาก process_cache แทนการอ่านจาก last_seen_data
+    # รูปสีน้ำ + สี (จาก cache ล่าสุด)
+    water_image = process_cache["water_image"]
+    water_color = process_cache["water_color"]
 
-    # รูปกุ้งลอย
-    shrimp_float_image = None
-    if shrimp_d:
-        shrimp_float_image = _pick_url_maybe_list(shrimp_d.get("output_image"))
+    # รูปกุ้งลอย (จาก cache ล่าสุด)
+    shrimp_float_image = process_cache["shrimp_float_image"]
 
     data = {
         "pondId": str(pond_id) if pond_id is not None else None,
@@ -841,7 +878,7 @@ async def receive_stock_json(request: Request):
 @app.post("/data")
 async def receive_sensor_data(request: Request):
     """รับข้อมูล sensor JSON และส่ง status ทันที (ใช้ข้อมูล /process อันล่าสุด)"""
-    global last_seen_data
+    global last_seen_data, last_sent_status
     
     try:
         data = await request.json()
@@ -879,8 +916,12 @@ async def receive_sensor_data(request: Request):
     status_json = build_pond_status_json(pond_id)
 
     if APP_STATUS_URL:
-        print(f"📤 Sending pond_status immediately after sensor update: {status_json}")
-        _send_json_to(APP_STATUS_URL, status_json)
+        if _strip_timestamp(status_json) != _strip_timestamp(last_sent_status):
+            print(f"📤 Sending pond_status immediately after sensor update: {status_json}")
+            _send_json_to(APP_STATUS_URL, status_json)
+            last_sent_status = status_json
+        else:
+            print("ℹ️ No change in pond_status (sensor update) -> skip send")
     else:
         print(f"ℹ️ No APP_STATUS_URL set, skipping send")
 
@@ -905,6 +946,16 @@ def get_size(pond_id: int):
         with open(SHRIMP_SIZE_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
     return {"error": "no shrimp_size.json yet"}
+
+
+@app.get("/cache/status")
+def get_cache_status():
+    """ดูสถานะของ process_cache"""
+    return {
+        "process_cache": process_cache,
+        "last_seen_data_keys": list(last_seen_data.keys()),
+        "timestamp": format_timestamp()
+    }
 
 
 # ==========================
@@ -1009,11 +1060,12 @@ def health_check():
     return {"status": "ok"}
 
 
+last_sent_status = None
+last_sent_size = None
+
 # ==========================
 # BACKGROUND LOOP
 # ==========================
-last_sent_status = None
-last_sent_size = None
 
 def _strip_timestamp(d: dict) -> dict:
     """คืนค่า dict โดยตัดฟิลด์ timestamp ออก (ใช้เช็คการเปลี่ยนแปลงจริง)"""
@@ -1064,8 +1116,7 @@ async def check_device_heartbeats():
 # ==========================
 async def loop_build_and_push(pond_id: int):
     """วนลูปโหลดข้อมูลล่าสุด -> build json -> push ไปยังแอปทุกครั้ง"""
-    global last_seen_data
-
+    global last_seen_data, last_sent_status, last_sent_size
     while True:
         try:
             # ตรวจ heartbeat
@@ -1094,21 +1145,35 @@ async def loop_build_and_push(pond_id: int):
 
             din_path, din_d = _latest_json_in_dir(FS_DIN_DIR, pond_id=pond_id)
             if din_d:
-                last_seen_data["din"] = din_d
+                last_seen_data["din"] = din_d   
 
-            # 📝 build json ทุกครั้ง
+            # ✅ ข้ามการส่งหากยังไม่มีข้อมูล sensor
+            if not last_seen_data.get("sensor"):
+                print("ℹ️ No sensor data yet — skipping send")
+                await asyncio.sleep(5)
+                continue
+
+            # 📝 build json เมื่อมี sensor แล้ว
             status_json = build_pond_status_json(pond_id)
-            size_json = build_shrimp_size_json(pond_id)   # ✅ เพิ่มบรรทัดนี้
+            size_json = build_shrimp_size_json(pond_id)
 
-            # 📤 ส่ง pond_status ทุกครั้ง
+            # 📤 ส่ง pond_status เฉพาะเมื่อข้อมูลเปลี่ยน
             if APP_STATUS_URL:
-                print("📤 Sending pond_status_json:", status_json)
-                _send_json_to(APP_STATUS_URL, status_json)
+                if _strip_timestamp(status_json) != _strip_timestamp(last_sent_status):
+                    print("📤 Sending pond_status_json:", status_json)
+                    _send_json_to(APP_STATUS_URL, status_json)
+                    last_sent_status = status_json
+                else:
+                    print("ℹ️ No change in pond_status -> skip send")
 
-            # 📤 ส่ง shrimp_size ทุกครั้ง
+            # 📤 ส่ง shrimp_size เฉพาะเมื่อข้อมูลเปลี่ยน
             if APP_SIZE_URL:
-                print("📤 Sending shrimp_size_json:", size_json)
-                _send_json_to(APP_SIZE_URL, size_json)
+                if _strip_timestamp(size_json) != _strip_timestamp(last_sent_size):
+                    print("📤 Sending shrimp_size_json:", size_json)
+                    _send_json_to(APP_SIZE_URL, size_json)
+                    last_sent_size = size_json
+                else:
+                    print("ℹ️ No change in shrimp_size -> skip send")
 
         except Exception as e:
             print("🚨 Loop error:", e)
