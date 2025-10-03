@@ -87,7 +87,7 @@ def analyze_shrimp(input_path, total_larvae=None, pond_number=None,
         for i, kp in enumerate(keypoints):
             if i >= len(boxes_cls) or i >= len(boxes_conf): 
                 continue
-            if int(boxes_cls[i]) != class_id or boxes_conf[i] <= 0.6: 
+            if int(boxes_cls[i]) != class_id or boxes_conf[i] <= 0.5: 
                 continue
             if len(kp) < 3: 
                 continue
@@ -162,6 +162,7 @@ def analyze_shrimp(input_path, total_larvae=None, pond_number=None,
     print(f"✅ บันทึกผลลัพธ์: {output_txt_path_output}\n")
 
     return output_img_path_output, output_txt_path_output
+
 
 
 
