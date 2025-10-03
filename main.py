@@ -29,6 +29,7 @@ from process.din import analyze_video
 from process.water import analyze_water
 from local_storage import LocalStorage
 from auto_dose import process_auto_dose   # 🟢 เพิ่มบรรทัดนี้
+import math
 
 # ==========================
 # FastAPI และ CORS
@@ -791,8 +792,8 @@ def build_shrimp_size_json(pond_id: int) -> dict:
     data = {
         "pondId": pond_id,
         "timestamp": format_timestamp(),
-        "Size_CM": length_cm,   # ปัดทศนิยม 2 ตำแหน่ง
-        "Size_gram": weight_g,  # ปัดทศนิยม 1 ตำแหน่ง
+        "Size_CM": round(length_cm,2),   # ปัดทศนิยม 2 ตำแหน่ง
+        "Size_gram": round(weight_g,2),  # ปัดทศนิยม 1 ตำแหน่ง
         "SizePic": size_image,
         "PicFood": raw_image or size_image,
         "PicKungDin": video_url,
