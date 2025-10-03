@@ -19,7 +19,7 @@ tracker = DeepSort(max_age=30, n_init=3, max_cosine_distance=0.3)
 NO_MOVE_THRESHOLD = 2.5   # ใช้แบบเวอร์ชันที่สอง
 shrimp_moved_once = set()
 movement_status = {}
-CONFIDENCE_THRESHOLD = 0.9
+CONFIDENCE_THRESHOLD = 0.85
 
 
 def analyze_video(input_path, original_name: str = None):
@@ -160,3 +160,4 @@ def analyze_video(input_path, original_name: str = None):
     print(f"✅ บันทึกวิดีโอที่: {output_video_path}")
     print(f"📄 บันทึกผลข้อความที่: {output_txt_path}")
     return output_video_path, output_txt_path
+
