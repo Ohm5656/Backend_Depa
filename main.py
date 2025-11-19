@@ -778,7 +778,7 @@ def build_shrimp_size_json(pond_id: int) -> dict:
 
     size_image = None
     raw_image = None
-    length_cm, weight_g = None, None
+    length_cm, weight_g = 0, 0
 
     if size_d:
         size_image = _pick_url_maybe_list(size_d.get("output_image"))
