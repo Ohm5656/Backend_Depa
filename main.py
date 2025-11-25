@@ -776,8 +776,8 @@ def build_shrimp_size_json(pond_id: int) -> dict:
     size_d = last_seen_data["size"]
     din_d = last_seen_data["din"]
 
-    size_image = None
-    raw_image = None
+    size_image = 0
+    raw_image = 0
     length_cm, weight_g = 0, 0
 
     if size_d:
