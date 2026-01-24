@@ -286,7 +286,7 @@ def extract_pond_id_from_filename(filename):
 # ==========================
 def login_and_get_token():
     """Login เพื่อรับ access token"""
-    login_url = "https://web-production-25db.up.railway.app/api/v1/auth/login"
+    login_url = "https://web-production-475f4.up.railway.app/api/v1/auth/login"
     login_data = "username=0812345678&password=admin123"
     try:
         response = requests.post(
@@ -332,7 +332,7 @@ def send_shrimp_alert_notification(pond_id, image_url, output_image_url):
     }
 
     # 3. ส่งแจ้งเตือน
-    push_url = "https://web-production-25db.up.railway.app/api/v1/push/send"
+    push_url = "https://web-production-475f4.up.railway.app/api/v1/push/send"
     try:
         response = requests.post(
             push_url,
@@ -383,7 +383,7 @@ def send_device_offline_notification(device_id, pond_id):
     }
 
     # 3. ส่งแจ้งเตือน
-    push_url = "https://web-production-25db.up.railway.app/api/v1/push/send"
+    push_url = "https://web-production-475f4.up.railway.app/api/v1/push/send"
     try:
         response = requests.post(
             push_url,
