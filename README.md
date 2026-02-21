@@ -123,14 +123,18 @@ ShrimpSense AI backend is optimized for:
 
 ---
 
-## 🧠 **Tech Stack**
+## 🧠 Tech Stack
 
-* FastAPI (Async Backend)
-* Python AI Pipeline
-* YOLO Computer Vision
-* OpenCV
-* Local Metadata Storage
-* IoT Integration
+<p align="center">
+
+<img src="https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white"/>
+<img src="https://img.shields.io/badge/Python_AI-3776AB?style=for-the-badge&logo=python&logoColor=white"/>
+<img src="https://img.shields.io/badge/YOLO_Computer_Vision-111111?style=for-the-badge&logo=opencv&logoColor=white"/>
+<img src="https://img.shields.io/badge/OpenCV-5C3EE8?style=for-the-badge&logo=opencv&logoColor=white"/>
+<img src="https://img.shields.io/badge/IoT_Integration-FF6F00?style=for-the-badge&logo=raspberrypi&logoColor=white"/>
+<img src="https://img.shields.io/badge/Metadata_Storage-0A66C2?style=for-the-badge&logo=databricks&logoColor=white"/>
+
+</p>
 
 ---
 
