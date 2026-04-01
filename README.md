@@ -8,7 +8,7 @@ AI + IoT + Computer Vision to transform traditional shrimp farming into a data-d
 
 ---
 
-## 🌊 **What is ShrimpSense AI?**
+##  **What is ShrimpSense AI?**
 
 **ShrimpSense AI** is an AI-driven backend platform designed to help shrimp farmers monitor pond conditions automatically using computer vision and smart analytics.
 
@@ -18,15 +18,15 @@ Built for innovation projects, real farms, and next-generation aquaculture start
 
 ---
 
-## ⚡ **Core Capabilities**
+## **Core Capabilities**
 
-✨ Real-time shrimp size estimation
-🧠 AI detection of floating or abnormal shrimp
-🎥 Behavioral analysis from video streams
-📡 IoT integration (Raspberry Pi / Edge devices)
-💾 Metadata-based local storage system
-🔗 Public file access via API endpoints
-🚀 Cloud-ready architecture (Railway / Docker)
+ Real-time shrimp size estimation
+ AI detection of floating or abnormal shrimp
+ Behavioral analysis from video streams
+ IoT integration (Raspberry Pi / Edge devices)
+ Metadata-based local storage system
+ Public file access via API endpoints
+ Cloud-ready architecture (Railway / Docker)
 
 ---
 
@@ -48,7 +48,7 @@ ShrimpSense converts raw pond visuals into structured data that farmers and apps
 
 ---
 
-## 🏗️ **Project Structure**
+##  **Project Structure**
 
 ```
 Backend_Depa/
@@ -91,7 +91,7 @@ Backend_Depa/
 
 ---
 
-## 🚀 **Quick Start**
+##  **Quick Start**
 
 ### Install Dependencies
 
@@ -123,7 +123,7 @@ ShrimpSense AI backend is optimized for:
 
 ---
 
-## 🧠 Tech Stack
+##  Tech Stack
 
 <p align="center">
 
@@ -138,7 +138,7 @@ ShrimpSense AI backend is optimized for:
 
 ---
 
-## 🌱 **Startup Vision**
+##  **Startup Vision**
 
 ShrimpSense AI aims to bring intelligent monitoring to aquaculture by combining:
 
